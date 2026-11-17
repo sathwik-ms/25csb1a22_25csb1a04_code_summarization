@@ -575,7 +575,7 @@ if "folder_report" not in st.session_state:
 # Input Source Selector
 input_mode = st.radio(
     "📥 Select Input Source Mode:",
-    ["✍️ Benchmark Presets", "📄 Upload File(s)", "📁 Folder / Directory Path"],
+    ["✍️ Benchmark Presets", "📄 Upload File(s)", "📦 Upload Folder (.ZIP Archive)", "📁 Local Folder Path"],
     horizontal=True,
 )
 
@@ -612,6 +612,22 @@ elif input_mode == "📄 Upload File(s)":
                     initial_code = target_f.getvalue().decode("utf-8")
                 except Exception:
                     initial_code = target_f.getvalue().decode("latin-1")
+
+            with st.expander("💾 Save Uploaded Files as a New Folder in Project"):
+                c_fn, c_fb = st.columns([2.5, 1.5])
+                with c_fn:
+                    new_folder_tag = st.text_input("New Folder Name:", value="my_uploaded_code")
+                with c_fb:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    if st.button("Save as Project Folder", use_container_width=True):
+                        from pathlib import Path
+                        clean_fn = "".join(c for c in new_folder_tag if c.isalnum() or c in ("_", "-")) or "custom_folder"
+                        target_dir = Path("input_codes") / clean_fn
+                        target_dir.mkdir(parents=True, exist_ok=True)
+                        for uf in uploaded_files:
+                            with open(target_dir / uf.name, "wb") as f_out:
+                                f_out.write(uf.getvalue())
+                        st.success(f"Successfully saved {len(uploaded_files)} file(s) into `input_codes/{clean_fn}`!")
 
             if run_batch_uploads:
                 with st.spinner("Auditing uploaded files with Multi-Agent Engine..."):
@@ -669,7 +685,85 @@ elif input_mode == "📄 Upload File(s)":
         st.info("Upload one or multiple code files to analyze.")
         initial_code = sample_dict.get(selected_sample, "")
 
-elif input_mode == "📁 Folder / Directory Path":
+elif input_mode == "📦 Upload Folder (.ZIP Archive)":
+    uploaded_zip = st.file_uploader(
+        "Upload a Project Folder as a .ZIP archive:",
+        type=["zip"],
+        help="Compress any folder on your computer into a .zip file and upload it here to import and analyze the entire folder."
+    )
+    if uploaded_zip is not None:
+        import zipfile
+        import io
+        from pathlib import Path
+
+        clean_folder_name = "".join(c for c in Path(uploaded_zip.name).stem if c.isalnum() or c in ("_", "-")) or "uploaded_folder"
+        dest_folder = Path("uploaded_folders") / clean_folder_name
+        dest_folder.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(uploaded_zip.getvalue())) as z:
+                dest_resolved = dest_folder.resolve()
+                for member in z.namelist():
+                    member_path = (dest_folder / member).resolve()
+                    if not str(member_path).startswith(str(dest_resolved)):
+                        raise Exception("Security check failed: Archive contains unsafe path traversal (Zip-Slip)")
+                z.extractall(dest_folder)
+
+            py_exts = {".py"}
+            cpp_exts = {".cpp", ".cc", ".cxx", ".h", ".hpp", ".c"}
+            target_exts = cpp_exts if selected_language == "C++" else py_exts
+            all_code_exts = py_exts | cpp_exts
+
+            all_code_files = [
+                p for p in dest_folder.rglob("*")
+                if p.is_file() and p.suffix.lower() in all_code_exts
+                and not any(x.startswith(".") or x in ("venv", "__pycache__", "build", "dist", "node_modules") for x in p.parts)
+            ]
+
+            matching_files = [p for p in all_code_files if p.suffix.lower() in target_exts]
+
+            if all_code_files:
+                st.success(
+                    f"✅ Successfully uploaded and unpacked folder **`{clean_folder_name}`**! "
+                    f"Found **{len(all_code_files)}** code file(s) ({len(matching_files)} matching {selected_language})."
+                )
+
+                col_z1, col_z2 = st.columns([2.5, 1.5])
+                file_map = {str(p.relative_to(dest_folder)): p for p in sorted(all_code_files)}
+                with col_z1:
+                    chosen_zip_file = st.selectbox("Select File from Uploaded Folder to View & Edit:", list(file_map.keys()))
+                with col_z2:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    run_zip_batch = st.button("📁 Run Batch Audit on Uploaded Folder", use_container_width=True)
+
+                selected_path = file_map[chosen_zip_file]
+                try:
+                    with open(selected_path, "r", encoding="utf-8", errors="replace") as f:
+                        initial_code = f.read()
+                except Exception as e:
+                    st.error(f"Failed to read file {selected_path}: {e}")
+
+                if run_zip_batch:
+                    with st.spinner(f"Running Multi-Agent Audit on all files in `{clean_folder_name}`..."):
+                        from agent_controller import AgentController
+                        controller = AgentController()
+                        lang_code = "cpp" if selected_language == "C++" else "python"
+                        rep = controller.analyze_folder(str(dest_folder), language=lang_code, recursive=True)
+                        rep["folder_path"] = f"Uploaded Folder: {clean_folder_name}"
+                        st.session_state.folder_report = rep
+                        st.success(f"Batch audit of {rep['total_files']} files completed successfully!")
+            else:
+                st.warning(f"No source code files (.py, .cpp, .h) found inside `{uploaded_zip.name}`.")
+                initial_code = sample_dict.get(selected_sample, "")
+
+        except Exception as err:
+            st.error(f"Error extracting zip archive: {err}")
+            initial_code = sample_dict.get(selected_sample, "")
+    else:
+        st.info("📦 **Tip:** To upload a whole folder, zip it (`.zip`) on your computer and upload it here.")
+        initial_code = sample_dict.get(selected_sample, "")
+
+elif input_mode == "📁 Local Folder Path":
     from pathlib import Path
     col_f1, col_f2 = st.columns([3, 1])
     with col_f1:
