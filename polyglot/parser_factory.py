@@ -1,12 +1,15 @@
 """
 polyglot/parser_factory.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-Unified Tree-sitter Parser Factory supporting Python and C++.
+Unified Parser Factory supporting Python and C++.
 Provides standardized AST parsing, error detection, and node exploration.
+Supports Tree-sitter when native binaries are available, with a resilient
+pure-Python C++ grammar engine fallback.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, List, Optional, Union
 
@@ -16,7 +19,7 @@ try:
     import tree_sitter_cpp
     import tree_sitter_python
     _TREE_SITTER_AVAILABLE = True
-except ImportError:
+except (ImportError, Exception):
     _TREE_SITTER_AVAILABLE = False
     tree_sitter = None
     Language = None
@@ -25,6 +28,7 @@ except ImportError:
     Node = None
 
 from polyglot.language_detector import SupportedLanguage, detect_language
+from polyglot.cpp_pure_parser import CppPureParser, CppPureTree, CppPureNode
 
 
 @dataclass
@@ -40,8 +44,8 @@ class ParsedAST:
     """Standardized result of a polyglot parse operation."""
     language: SupportedLanguage
     source_bytes: bytes
-    tree: Optional[Any]  # Tree-sitter Tree
-    root_node: Optional[Any]  # Tree-sitter root Node
+    tree: Optional[Any]  # Tree-sitter Tree or CppPureTree
+    root_node: Optional[Any]  # Tree-sitter root Node or CppPureNode
     is_valid: bool
     diagnostics: List[SyntaxDiagnostic]
 
@@ -52,7 +56,8 @@ class ParsedAST:
 
 class ParserFactory:
     """
-    Thread-safe factory managing Tree-sitter parsers for Python and C++.
+    Thread-safe factory managing parsers for Python and C++.
+    Supports native Tree-sitter and zero-dependency CppPureParser fallback.
     """
 
     _cpp_language: Optional[Any] = None
@@ -60,12 +65,12 @@ class ParserFactory:
 
     @classmethod
     def is_available(cls) -> bool:
-        return _TREE_SITTER_AVAILABLE
+        return True
 
     @classmethod
     def get_language(cls, lang: Union[SupportedLanguage, str]) -> Any:
         if not _TREE_SITTER_AVAILABLE:
-            raise RuntimeError("tree-sitter libraries are not installed.")
+            raise RuntimeError("tree-sitter libraries are not installed or blocked.")
 
         norm = lang.value if isinstance(lang, SupportedLanguage) else str(lang).lower()
 
@@ -95,7 +100,6 @@ class ParserFactory:
     ) -> ParsedAST:
         """
         Parse source code into a normalized ParsedAST instance.
-
         If language is not provided, it is auto-detected via language_detector.
         """
         source_str = code if isinstance(code, str) else code.decode("utf-8", errors="replace")
@@ -109,6 +113,42 @@ class ParserFactory:
         else:
             lang_enum = language
 
+        # ── C++ Pure-Python Fallback or Native Tree-sitter ──
+        if lang_enum == SupportedLanguage.CPP:
+            if _TREE_SITTER_AVAILABLE:
+                try:
+                    parser = cls.create_parser(lang_enum)
+                    tree = parser.parse(source_bytes)
+                    root = tree.root_node
+                    diagnostics: List[SyntaxDiagnostic] = []
+                    cls._collect_syntax_errors(root, diagnostics)
+                    return ParsedAST(
+                        language=lang_enum,
+                        source_bytes=source_bytes,
+                        tree=tree,
+                        root_node=root,
+                        is_valid=(not root.has_error and len(diagnostics) == 0),
+                        diagnostics=diagnostics
+                    )
+                except Exception:
+                    pass
+
+            # Pure-Python C++ Parser Engine
+            pure_parser = CppPureParser()
+            pure_tree = pure_parser.parse(source_str)
+            diagnostics = cls._diagnose_cpp_syntax(source_str)
+            is_valid = len(diagnostics) == 0
+
+            return ParsedAST(
+                language=lang_enum,
+                source_bytes=source_bytes,
+                tree=pure_tree,
+                root_node=pure_tree.root_node,
+                is_valid=is_valid,
+                diagnostics=diagnostics
+            )
+
+        # ── Python Parsing ──
         if not _TREE_SITTER_AVAILABLE:
             return ParsedAST(
                 language=lang_enum,
@@ -119,24 +159,91 @@ class ParserFactory:
                 diagnostics=[SyntaxDiagnostic(line=1, column=0, message="tree-sitter not installed", node_type="error")]
             )
 
-        parser = cls.create_parser(lang_enum)
-        tree = parser.parse(source_bytes)
-        root = tree.root_node
+        try:
+            parser = cls.create_parser(lang_enum)
+            tree = parser.parse(source_bytes)
+            root = tree.root_node
+            diagnostics = []
+            cls._collect_syntax_errors(root, diagnostics)
+            return ParsedAST(
+                language=lang_enum,
+                source_bytes=source_bytes,
+                tree=tree,
+                root_node=root,
+                is_valid=(not root.has_error and len(diagnostics) == 0),
+                diagnostics=diagnostics
+            )
+        except Exception as e:
+            return ParsedAST(
+                language=lang_enum,
+                source_bytes=source_bytes,
+                tree=None,
+                root_node=None,
+                is_valid=False,
+                diagnostics=[SyntaxDiagnostic(line=1, column=0, message=str(e), node_type="error")]
+            )
 
-        # Scan for ERROR nodes in tree
+    @classmethod
+    def _diagnose_cpp_syntax(cls, code: str) -> List[SyntaxDiagnostic]:
+        """Diagnoses C++ missing semicolons, unmatched braces, etc."""
         diagnostics: List[SyntaxDiagnostic] = []
-        cls._collect_syntax_errors(root, diagnostics)
+        lines = code.splitlines()
 
-        is_valid = not root.has_error and len(diagnostics) == 0
+        # Check unmatched braces
+        open_braces = 0
+        open_parens = 0
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("#"):
+                continue
 
-        return ParsedAST(
-            language=lang_enum,
-            source_bytes=source_bytes,
-            tree=tree,
-            root_node=root,
-            is_valid=is_valid,
-            diagnostics=diagnostics
-        )
+            for char in stripped:
+                if char == "{":
+                    open_braces += 1
+                elif char == "}":
+                    open_braces -= 1
+                elif char == "(":
+                    open_parens += 1
+                elif char == ")":
+                    open_parens -= 1
+
+            # Semicolon check on statements
+            # Exclude preprocessor, control headers, labels, braces, empty lines
+            if (
+                not stripped.endswith(";")
+                and not stripped.endswith("{")
+                and not stripped.endswith("}")
+                and not stripped.endswith(":")
+                and not stripped.endswith(",")
+                and not stripped.startswith(("#", "//", "/*", "*", "public", "private", "protected"))
+            ):
+                # Is it an assignment, declaration, or call?
+                if (
+                    re.match(r"^(int|char|double|float|bool|auto|size_t|std::\w+)\s+[a-zA-Z_]", stripped)
+                    or re.match(r"^[a-zA-Z_]\w*\s*(\+=|-=|\*=|/=|%=|=)", stripped)
+                    or re.match(r"^return\b", stripped)
+                    or re.search(r"\b(strcpy|strcat|system|printf|cout)\s*\(", stripped)
+                ):
+                    diagnostics.append(
+                        SyntaxDiagnostic(
+                            line=idx + 1,
+                            column=len(line),
+                            message=f"Missing semicolon ';' at line {idx + 1}",
+                            node_type=";"
+                        )
+                    )
+
+        if open_braces != 0:
+            diagnostics.append(
+                SyntaxDiagnostic(
+                    line=len(lines),
+                    column=0,
+                    message=f"Unmatched curly braces (difference: {open_braces})",
+                    node_type="}" if open_braces > 0 else "{"
+                )
+            )
+
+        return diagnostics
 
     @classmethod
     def _collect_syntax_errors(cls, node: Any, diagnostics: List[SyntaxDiagnostic]) -> None:
@@ -147,16 +254,17 @@ class ParserFactory:
         stack = [node]
         while stack:
             curr = stack.pop()
-            if curr.is_error or curr.is_missing:
+            if getattr(curr, 'is_error', False) or getattr(curr, 'is_missing', False):
+                row = getattr(curr.start_point, 'row', 0)
+                col = getattr(curr.start_point, 'column', 0)
                 diagnostics.append(
                     SyntaxDiagnostic(
-                        line=curr.start_point.row + 1,
-                        column=curr.start_point.column,
-                        message=f"Syntax defect '{curr.type}' detected at line {curr.start_point.row + 1}",
+                        line=row + 1,
+                        column=col,
+                        message=f"Syntax defect '{curr.type}' detected at line {row + 1}",
                         node_type=curr.type
                     )
                 )
-            # Add children to stack
-            for child in curr.children:
-                if child.has_error or child.is_error or child.is_missing:
+            for child in getattr(curr, 'children', []):
+                if getattr(child, 'has_error', False) or getattr(child, 'is_error', False) or getattr(child, 'is_missing', False):
                     stack.append(child)
