@@ -83,8 +83,10 @@ def run_pipeline(source_code: str, model_path: str | None = None, language: str 
 
 def main():
     parser = argparse.ArgumentParser(description="PDG-Enhanced Code Summarization (Open-Source API)")
-    parser.add_argument("--file", type=str, help="Path to Python file to summarize")
-    parser.add_argument("--code", type=str, help="Python code string to summarize")
+    parser.add_argument("--file", type=str, help="Path to Python or C++ file to summarize")
+    parser.add_argument("--folder", type=str, help="Path to directory/folder to scan and batch-analyze all source files")
+    parser.add_argument("--no-recursive", action="store_true", help="Do not search subfolders recursively when --folder is used")
+    parser.add_argument("--code", type=str, help="Python or C++ code string to summarize")
     parser.add_argument(
         "--model-path",
         type=str,
@@ -119,7 +121,36 @@ def main():
     )
     
     args = parser.parse_args()
-    
+
+    # Batch Folder Processing Mode
+    if args.folder:
+        print("\n================ FOLDER & REPOSITORY BATCH ANALYSIS ================")
+        print(f"Scanning directory: {args.folder}")
+        controller = AgentController(model_path=args.model_path)
+        batch_report = controller.analyze_folder(
+            args.folder,
+            language=args.language,
+            recursive=not args.no_recursive
+        )
+        print(f"Total Source Files Discovered: {batch_report['total_files']}")
+        print(f"Average Security Health Score: {batch_report['avg_security_score']}/100")
+        print(f"Total CWE Vulnerabilities:     {batch_report['total_vulnerabilities']}")
+        print(f"Average Eco Efficiency Score:  {batch_report['avg_eco_score']}/100")
+        print("\n" + "-" * 85)
+        print(f"{'File Name':<32} {'Lang':<8} {'Lines':<7} {'Security':<10} {'Eco Score':<10} {'Status'}")
+        print("-" * 85)
+        for f in batch_report["files"]:
+            if "error" in f:
+                print(f"{f['file_name']:<32} {'ERR':<8} {'-':<7} {'ERROR':<10} {'-':<10} {f['error'][:25]}")
+            else:
+                sec_str = f"{f['security_score']}/100"
+                eco_str = f"{f['eco_score']}/100"
+                healed_tag = " (Repaired)" if f.get("healed") else ""
+                vuln_tag = f" ({f['vulnerabilities']} CWEs)" if f['vulnerabilities'] > 0 else " Clean"
+                print(f"{f['file_name']:<32} {f['language']:<8} {f['lines']:<7} {sec_str:<10} {eco_str:<10} {f['security_rating']}{vuln_tag}{healed_tag}")
+        print("-" * 85)
+        return
+
     source_code = ""
     if args.file:
         with open(args.file, 'r', encoding='utf-8') as f:

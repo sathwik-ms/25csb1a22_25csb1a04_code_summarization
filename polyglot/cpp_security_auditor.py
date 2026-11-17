@@ -103,7 +103,28 @@ class CppSecurityAuditor:
         if parsed.root_node:
             self._scan_ast_nodes(parsed.root_node, lines, findings, seen)
 
-        # 2. Text / Regex Scan for Use-After-Free & Hardcoded Credentials
+        # 2. Direct lexical scanning for dangerous C/C++ function calls (CWE-120, CWE-78, CWE-338)
+        for func_name, (cwe_id, category, severity, message, rule_id) in DANGEROUS_CALLS_MAP.items():
+            pattern = rf'\b(?:std::)?{func_name}\s*\('
+            for idx, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*"):
+                    continue
+                if re.search(pattern, line):
+                    key = (rule_id, idx + 1)
+                    if key not in seen:
+                        seen.add(key)
+                        findings.append({
+                            'rule_id': rule_id,
+                            'cwe': cwe_id,
+                            'category': category,
+                            'line': idx + 1,
+                            'message': message,
+                            'severity': severity,
+                            'snippet': line.strip()[:100]
+                        })
+
+        # 3. Text / Regex Scan for Use-After-Free & Hardcoded Credentials
         for pattern, message, severity, rule_id in CPP_SECRET_PATTERNS:
             for idx, line in enumerate(lines):
                 if re.search(pattern, line):
