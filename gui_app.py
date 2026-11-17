@@ -561,13 +561,182 @@ with st.sidebar:
     st.caption("Active LLM Backend: Groq / `qwen/qwen3.8-27b`")
 
 
+# Session state persistence
+if "agent_context" not in st.session_state:
+    st.session_state.agent_context = None
+
+if "opt_result" not in st.session_state:
+    st.session_state.opt_result = None
+
+if "folder_report" not in st.session_state:
+    st.session_state.folder_report = None
+
+
+# Input Source Selector
+input_mode = st.radio(
+    "📥 Select Input Source Mode:",
+    ["✍️ Benchmark Presets", "📄 Upload File(s)", "📁 Folder / Directory Path"],
+    horizontal=True,
+)
+
+initial_code = ""
+
+if input_mode == "✍️ Benchmark Presets":
+    initial_code = sample_dict.get(selected_sample, "")
+
+elif input_mode == "📄 Upload File(s)":
+    uploaded_files = st.file_uploader(
+        f"Upload One or Multiple {selected_language} Scripts:",
+        type=["py", "cpp", "cc", "cxx", "h", "hpp", "txt"],
+        accept_multiple_files=True,
+    )
+    if uploaded_files:
+        if len(uploaded_files) == 1:
+            try:
+                initial_code = uploaded_files[0].getvalue().decode("utf-8")
+            except Exception:
+                initial_code = uploaded_files[0].getvalue().decode("latin-1")
+            st.info(f"Loaded single file: `{uploaded_files[0].name}`")
+        else:
+            file_names = [f.name for f in uploaded_files]
+            col_u1, col_u2 = st.columns([2.5, 1.5])
+            with col_u1:
+                chosen_file = st.selectbox(f"Select from {len(uploaded_files)} Uploaded Files to View/Edit:", file_names)
+            with col_u2:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                run_batch_uploads = st.button("📊 Batch Audit All Uploaded Files", use_container_width=True)
+
+            target_f = next((f for f in uploaded_files if f.name == chosen_file), None)
+            if target_f:
+                try:
+                    initial_code = target_f.getvalue().decode("utf-8")
+                except Exception:
+                    initial_code = target_f.getvalue().decode("latin-1")
+
+            if run_batch_uploads:
+                with st.spinner("Auditing uploaded files with Multi-Agent Engine..."):
+                    from agent_controller import AgentController
+                    controller = AgentController()
+                    batch_files = []
+                    total_vulns = 0
+                    sec_scores = []
+                    eco_scores = []
+                    for uf in uploaded_files:
+                        try:
+                            content = uf.getvalue().decode("utf-8")
+                        except Exception:
+                            content = uf.getvalue().decode("latin-1")
+                        f_lang = "cpp" if any(uf.name.lower().endswith(ext) for ext in (".cpp", ".cc", ".cxx", ".h", ".hpp", ".c")) else "python"
+                        try:
+                            f_ctx = controller.run_workflow(content, language=f_lang)
+                            findings = f_ctx.security_profile.get("findings", [])
+                            sec_s = f_ctx.security_profile.get("security_score", 100)
+                            eco_s = f_ctx.green_profile.get("score", 100)
+                            total_vulns += len(findings)
+                            sec_scores.append(sec_s)
+                            eco_scores.append(eco_s)
+                            batch_files.append({
+                                "file_name": uf.name,
+                                "rel_path": uf.name,
+                                "language": f_lang,
+                                "lines": len(content.splitlines()),
+                                "security_score": sec_s,
+                                "security_rating": f_ctx.security_profile.get("rating", "Secure"),
+                                "vulnerabilities": len(findings),
+                                "cwe_list": [f.get("cwe") for f in findings],
+                                "eco_score": eco_s,
+                                "eco_rating": f_ctx.green_profile.get("rating", "Efficient"),
+                                "healed": f_ctx.healing_report.get("is_healed", False),
+                                "context": f_ctx,
+                            })
+                        except Exception as e:
+                            batch_files.append({
+                                "file_name": uf.name,
+                                "rel_path": uf.name,
+                                "language": f_lang,
+                                "error": str(e),
+                            })
+                    st.session_state.folder_report = {
+                        "folder_path": f"Batch Upload ({len(uploaded_files)} files)",
+                        "total_files": len(batch_files),
+                        "total_vulnerabilities": total_vulns,
+                        "avg_security_score": round(sum(sec_scores)/len(sec_scores), 1) if sec_scores else 100.0,
+                        "avg_eco_score": round(sum(eco_scores)/len(eco_scores), 1) if eco_scores else 100.0,
+                        "files": batch_files,
+                    }
+                    st.success("Batch upload audit completed successfully!")
+    else:
+        st.info("Upload one or multiple code files to analyze.")
+        initial_code = sample_dict.get(selected_sample, "")
+
+elif input_mode == "📁 Folder / Directory Path":
+    from pathlib import Path
+    col_f1, col_f2 = st.columns([3, 1])
+    with col_f1:
+        folder_path_input = st.text_input(
+            "Enter Folder Path (Relative or Absolute):",
+            value="input_codes",
+            help="Directory to scan for code files. E.g. 'input_codes' or 'input_codes/graph_15_inputs'"
+        )
+    with col_f2:
+        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+        recursive_scan = st.checkbox("Recursive Search", value=True)
+
+    folder_obj = Path(folder_path_input)
+    if folder_obj.exists() and folder_obj.is_dir():
+        py_exts = {".py"}
+        cpp_exts = {".cpp", ".cc", ".cxx", ".h", ".hpp", ".c"}
+        target_exts = cpp_exts if selected_language == "C++" else py_exts
+        
+        walk = folder_obj.rglob("*") if recursive_scan else folder_obj.glob("*")
+        discovered = [
+            p for p in walk if p.is_file() and p.suffix.lower() in target_exts
+            and not any(x.startswith(".") or x in ("venv", "__pycache__", "build", "dist", "node_modules") for x in p.parts)
+        ]
+        
+        if discovered:
+            st.success(f"Discovered **{len(discovered)}** {selected_language} file(s) in `{folder_path_input}`")
+            col_sel, col_btn = st.columns([2.5, 1.5])
+            file_map = {str(p.relative_to(folder_obj)): p for p in sorted(discovered)}
+            with col_sel:
+                chosen_folder_file = st.selectbox("Select File from Folder to Inspect:", list(file_map.keys()))
+            with col_btn:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                run_folder_batch = st.button("📁 Run Batch Audit on Entire Folder", use_container_width=True)
+
+            selected_path = file_map[chosen_folder_file]
+            try:
+                with open(selected_path, "r", encoding="utf-8", errors="replace") as f:
+                    initial_code = f.read()
+            except Exception as e:
+                st.error(f"Failed to read file {selected_path}: {e}")
+
+            if run_folder_batch:
+                with st.spinner(f"Scanning and auditing all {len(discovered)} files in `{folder_path_input}`..."):
+                    try:
+                        from agent_controller import AgentController
+                        controller = AgentController()
+                        lang_code = "cpp" if selected_language == "C++" else "python"
+                        rep = controller.analyze_folder(folder_path_input, language=lang_code, recursive=recursive_scan)
+                        st.session_state.folder_report = rep
+                        st.success(f"Batch audit of {rep['total_files']} files completed successfully!")
+                    except Exception as err:
+                        st.error(f"Error analyzing folder: {err}")
+        else:
+            st.warning(f"No {selected_language} files found in `{folder_path_input}`.")
+            initial_code = sample_dict.get(selected_sample, "")
+    else:
+        st.error(f"Directory not found: `{folder_path_input}`")
+        initial_code = sample_dict.get(selected_sample, "")
+
+
 # Main Input Columns
 col_code, col_act = st.columns([2.5, 1])
 
 with col_code:
     code_input = st.text_area(
         f"{selected_language} Source Code to Analyze:",
-        value=sample_dict[selected_sample],
+        value=initial_code,
         height=280,
     )
 
@@ -575,22 +744,10 @@ with col_act:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     run_agentic = st.button("🚀 Run 5-Agent Intelligence Pipeline", use_container_width=True, type="primary")
     run_optimizer = st.button("⚡ Run Green & Secure Optimizer", use_container_width=True)
-    uploaded_file = st.file_uploader(f"Or Upload {selected_language} Script", type=["py", "cpp", "cc", "cxx", "h", "hpp", "txt"])
-
-# Handle file upload override
-if uploaded_file is not None:
-    try:
-        code_input = uploaded_file.getvalue().decode("utf-8")
-    except Exception:
-        code_input = uploaded_file.getvalue().decode("latin-1")
-
-
-# Session state persistence
-if "agent_context" not in st.session_state:
-    st.session_state.agent_context = None
-
-if "opt_result" not in st.session_state:
-    st.session_state.opt_result = None
+    if st.session_state.folder_report is not None:
+        if st.button("🗑️ Clear Batch Report", use_container_width=True):
+            st.session_state.folder_report = None
+            st.rerun()
 
 
 # Trigger Pipeline Execution
@@ -647,6 +804,57 @@ if run_optimizer:
                 st.error(f"Error during optimization: {e}")
                 with st.expander("Detailed Traceback"):
                     st.code(traceback.format_exc(), language="python")
+
+
+# Render Folder / Batch Summary if available
+if st.session_state.folder_report is not None:
+    rep = st.session_state.folder_report
+    with st.expander(f"📁 Folder & Batch Audit Report: {rep['folder_path']} ({rep['total_files']} Files)", expanded=True):
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.markdown(f"<div class='metric-card'><h3>{rep['total_files']}</h3><span>Total Files Scanned</span></div>", unsafe_allow_html=True)
+        with m2:
+            sec_avg = rep['avg_security_score']
+            color = "#34d399" if sec_avg >= 80 else ("#fbbf24" if sec_avg >= 50 else "#f87171")
+            st.markdown(f"<div class='metric-card'><h3 style='color: {color}'>{sec_avg}/100</h3><span>Avg Security Score</span></div>", unsafe_allow_html=True)
+        with m3:
+            st.markdown(f"<div class='metric-card'><h3>{rep['total_vulnerabilities']}</h3><span>Total CWEs Found</span></div>", unsafe_allow_html=True)
+        with m4:
+            st.markdown(f"<div class='metric-card'><h3>{rep['avg_eco_score']}/100</h3><span>Avg Eco Score</span></div>", unsafe_allow_html=True)
+
+        st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+
+        table_rows = []
+        for f in rep["files"]:
+            table_rows.append({
+                "File": f.get("rel_path") or f.get("file_name"),
+                "Language": f.get("language", "unknown").upper(),
+                "Lines": f.get("lines", 0),
+                "Security Score": f"{f.get('security_score', '-')}/100" if f.get('security_score') is not None else "-",
+                "Risk Rating": f.get("security_rating", "-"),
+                "CWE Findings": f.get("vulnerabilities", 0),
+                "Eco Score": f"{f.get('eco_score', '-')}/100" if f.get('eco_score') is not None else "-",
+                "Rating": f.get("eco_rating", "-"),
+                "Self-Healed": "Yes" if f.get("healed") else "No",
+            })
+        if table_rows:
+            import pandas as pd
+            df = pd.DataFrame(table_rows)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+        file_options = [f.get("rel_path") or f.get("file_name") for f in rep["files"] if "context" in f]
+        if file_options:
+            c_sel, c_btn = st.columns([3, 1])
+            with c_sel:
+                selected_batch_file = st.selectbox("🔍 Load specific file results into 5-Agent Pipeline Tabs below:", file_options)
+            with c_btn:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("Load File Results", use_container_width=True):
+                    chosen_rec = next((f for f in rep["files"] if (f.get("rel_path") or f.get("file_name")) == selected_batch_file), None)
+                    if chosen_rec and "context" in chosen_rec:
+                        st.session_state.agent_context = chosen_rec["context"]
+                        st.success(f"Loaded '{selected_batch_file}' into detailed tabs below!")
+                        st.rerun()
 
 
 # Render Results Tabs

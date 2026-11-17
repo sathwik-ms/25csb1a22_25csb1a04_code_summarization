@@ -563,6 +563,95 @@ class AgentController:
             return "// No standalone C++ function definitions found to document."
         return "\n\n".join(blocks)
 
+    def analyze_folder(self, folder_path: str, language: Optional[str] = None, recursive: bool = True) -> dict:
+        """
+        Scans and analyzes all source code files within a directory.
+        Supports Python (.py) and C++ (.cpp, .cc, .cxx, .h, .hpp).
+        Returns an aggregate report including per-file metrics, security findings, and green scores.
+        """
+        from pathlib import Path
+        folder = Path(folder_path)
+        if not folder.exists() or not folder.is_dir():
+            raise ValueError(f"Directory not found or not a valid folder: {folder_path}")
+
+        py_exts = {".py"}
+        cpp_exts = {".cpp", ".cc", ".cxx", ".h", ".hpp", ".c"}
+
+        if language:
+            lang_lower = language.lower()
+            if lang_lower in ("cpp", "c++"):
+                target_exts = cpp_exts
+            else:
+                target_exts = py_exts
+        else:
+            target_exts = py_exts | cpp_exts
+
+        pattern_files = []
+        walk_iter = folder.rglob("*") if recursive else folder.glob("*")
+        for p in walk_iter:
+            if p.is_file() and p.suffix.lower() in target_exts:
+                parts = p.parts
+                if any(x.startswith(".") or x in ("venv", "__pycache__", "build", "dist", "node_modules") for x in parts):
+                    continue
+                pattern_files.append(p)
+
+        file_results = []
+        total_vulns = 0
+        sec_scores = []
+        eco_scores = []
+
+        for file_path in sorted(pattern_files):
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+
+                file_lang = "cpp" if file_path.suffix.lower() in cpp_exts else "python"
+                ctx = self.run_workflow(content, language=file_lang)
+
+                findings = ctx.security_profile.get("findings", [])
+                sec_score = ctx.security_profile.get("security_score", 100)
+                eco_score = ctx.green_profile.get("score", 100)
+
+                total_vulns += len(findings)
+                sec_scores.append(sec_score)
+                eco_scores.append(eco_score)
+
+                file_results.append({
+                    "file_name": file_path.name,
+                    "rel_path": str(file_path.relative_to(folder)),
+                    "abs_path": str(file_path.resolve()),
+                    "language": file_lang,
+                    "lines": len(content.splitlines()),
+                    "security_score": sec_score,
+                    "security_rating": ctx.security_profile.get("rating", "Secure"),
+                    "vulnerabilities": len(findings),
+                    "cwe_list": [f.get("cwe") for f in findings],
+                    "eco_score": eco_score,
+                    "eco_rating": ctx.green_profile.get("rating", "Efficient"),
+                    "healed": ctx.healing_report.get("is_healed", False),
+                    "context": ctx,
+                })
+            except Exception as e:
+                file_results.append({
+                    "file_name": file_path.name,
+                    "rel_path": str(file_path.relative_to(folder)),
+                    "abs_path": str(file_path.resolve()),
+                    "language": "unknown",
+                    "error": str(e),
+                })
+
+        avg_sec = round(sum(sec_scores) / len(sec_scores), 1) if sec_scores else 100.0
+        avg_eco = round(sum(eco_scores) / len(eco_scores), 1) if eco_scores else 100.0
+
+        return {
+            "folder_path": str(folder.resolve()),
+            "total_files": len(file_results),
+            "total_vulnerabilities": total_vulns,
+            "avg_security_score": avg_sec,
+            "avg_eco_score": avg_eco,
+            "files": file_results,
+        }
+
 
 def run_agentic_pipeline(source_code: str, model_path: Optional[str] = None, language: Optional[str] = None) -> AgentContext:
     """Entry point to execute the complete Multi-Agent Intelligence Pipeline."""

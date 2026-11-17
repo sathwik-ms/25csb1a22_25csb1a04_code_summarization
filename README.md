@@ -153,6 +153,8 @@ streamlit run gui_app.py
 ```
 
 Features:
+- **Flexible Input Modes:** Choose from Benchmark Presets, Upload Single/Multiple Files, or scan an **Entire Folder / Directory Path**.
+- **Batch Folder Audit:** Scan an entire codebase directory to produce project-wide security scorecards, aggregate carbon impact, and interactive breakdown tables.
 - Language switch between **Python** and **C++** with preloaded vulnerability samples.
 - Live physics-driven PDG dependency explorer.
 - Complete security scorecard with CWE findings, remediation steps, and taint traces.
@@ -160,6 +162,11 @@ Features:
 - Side-by-side optimization diff viewer.
 
 ### Command-Line Interface (CLI)
+
+Scan and batch-audit an entire folder or repository:
+```bash
+python main.py --folder input_codes/graph_15_inputs
+```
 
 Summarize a Python or C++ script:
 ```bash
