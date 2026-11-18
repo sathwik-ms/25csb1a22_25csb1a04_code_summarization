@@ -10,6 +10,9 @@ def _get_optimizer_dfa():
 
 
 import sys
+import os
+import re
+import html
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -24,6 +27,137 @@ from main import run_pipeline
 from agent_controller import AgentController
 from optimizer_agent import optimize_code
 from graph_visualizer import generate_pdg_html
+
+
+def render_diff_html(diff_text: str) -> str:
+    """Renders a GitHub-grade, high-contrast, beautiful visual diff."""
+    if not diff_text or not diff_text.strip():
+        return "<div class='diff-empty'>No textual differences found between original and refactored code.</div>"
+    
+    lines = diff_text.splitlines()
+    add_count = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
+    del_count = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
+    
+    formatted_lines = []
+    for l in lines:
+        escaped = html.escape(l)
+        if l.startswith("---") or l.startswith("+++"):
+            formatted_lines.append(f"<div class='diff-line diff-file-header'><span class='diff-gutter'></span><span class='diff-text'>{escaped}</span></div>")
+        elif l.startswith("@@"):
+            formatted_lines.append(f"<div class='diff-line diff-hunk'><span class='diff-gutter'>§</span><span class='diff-text'>{escaped}</span></div>")
+        elif l.startswith("+"):
+            content = escaped[1:] if len(escaped) > 1 else ""
+            formatted_lines.append(f"<div class='diff-line diff-add'><span class='diff-gutter'>+</span><span class='diff-text'>{content}</span></div>")
+        elif l.startswith("-"):
+            content = escaped[1:] if len(escaped) > 1 else ""
+            formatted_lines.append(f"<div class='diff-line diff-del'><span class='diff-gutter'>-</span><span class='diff-text'>{content}</span></div>")
+        else:
+            content = escaped[1:] if escaped.startswith(" ") else escaped
+            formatted_lines.append(f"<div class='diff-line diff-ctx'><span class='diff-gutter'>&nbsp;</span><span class='diff-text'>{content}</span></div>")
+            
+    body_html = "\n".join(formatted_lines)
+    
+    return f"""
+    <div class="diff-viewer-card">
+      <div class="diff-viewer-header">
+        <div class="diff-header-left">
+          <span class="diff-icon">⚖️</span>
+          <span>Unified Code Diff (Patch View)</span>
+        </div>
+        <div class="diff-header-right">
+          <span class="diff-pill diff-pill-add">+{add_count} additions</span>
+          <span class="diff-pill diff-pill-del">-{del_count} deletions</span>
+        </div>
+      </div>
+      <div class="diff-content-scroll">
+        {body_html}
+      </div>
+    </div>
+    """
+
+
+def render_security_checklist(items: list) -> str:
+    """Renders structured, beautiful checklist cards for resolved security vulnerabilities."""
+    if not items:
+        return "<div class='checklist-card cl-clean'><div class='cl-icon cl-icon-check'>✅</div><div class='cl-body'><div class='cl-desc'>Clean code baseline: No security vulnerabilities required patching.</div></div></div>"
+    
+    cards = []
+    for item in items:
+        raw = str(item).strip()
+        cwe_match = re.search(r'(CWE-\d+)', raw, re.IGNORECASE)
+        cwe_badge = cwe_match.group(1).upper() if cwe_match else "SECURITY FIX"
+        
+        clean_text = raw
+        if cwe_match:
+            clean_text = raw.replace(cwe_match.group(0), "").strip(" :()-")
+        
+        escaped_text = html.escape(clean_text)
+        cards.append(f"""
+        <div class="checklist-card cl-security">
+          <div class="cl-icon cl-icon-check">✓</div>
+          <div class="cl-body">
+            <div class="cl-header-row">
+              <span class="cl-badge cl-badge-cwe">{cwe_badge}</span>
+              <span class="cl-badge cl-badge-status">REMEDIATED & VERIFIED</span>
+            </div>
+            <div class="cl-desc">{escaped_text}</div>
+          </div>
+        </div>
+        """)
+    return f"<div class='checklist-container'>{''.join(cards)}</div>"
+
+
+def render_improvements_checklist(items: list) -> str:
+    """Renders structured checklist cards for algorithmic and energy optimizations."""
+    if not items:
+        return "<div class='checklist-card cl-clean'><div class='cl-icon cl-icon-eco'>⚡</div><div class='cl-body'><div class='cl-desc'>Execution path already optimal; zero algorithmic regressions.</div></div></div>"
+    
+    cards = []
+    for item in items:
+        raw = str(item).strip()
+        comp_match = re.search(r'(\bO\([^)]+\)\s*(?:->|→)\s*O\([^)]+\))', raw)
+        complexity_badge = comp_match.group(1) if comp_match else "COMPILER SPEEDUP"
+        
+        clean_text = raw
+        if comp_match:
+            clean_text = raw.replace(comp_match.group(0), "").strip(" :()-")
+            
+        escaped_text = html.escape(clean_text)
+        cards.append(f"""
+        <div class="checklist-card cl-eco">
+          <div class="cl-icon cl-icon-eco">⚡</div>
+          <div class="cl-body">
+            <div class="cl-header-row">
+              <span class="cl-badge cl-badge-speedup">{complexity_badge}</span>
+              <span class="cl-badge cl-badge-verified">OPTIMIZED</span>
+            </div>
+            <div class="cl-desc">{escaped_text}</div>
+          </div>
+        </div>
+        """)
+    return f"<div class='checklist-container'>{''.join(cards)}</div>"
+
+
+def render_advice_checklist(items: list, icon: str = "💡", badge: str = "RECOMMENDATION") -> str:
+    """Renders actionable advisory items as clean checklist cards."""
+    if not items:
+        return "<div class='checklist-card cl-clean'><div class='cl-icon'>✨</div><div class='cl-body'><div class='cl-desc'>No pending advisory items.</div></div></div>"
+    
+    cards = []
+    for idx, item in enumerate(items, 1):
+        escaped_text = html.escape(str(item).strip())
+        cards.append(f"""
+        <div class="checklist-card cl-advice">
+          <div class="cl-icon cl-icon-bulb">{icon}</div>
+          <div class="cl-body">
+            <div class="cl-header-row">
+              <span class="cl-badge cl-badge-advice">{badge} #{idx}</span>
+            </div>
+            <div class="cl-desc">{escaped_text}</div>
+          </div>
+        </div>
+        """)
+    return f"<div class='checklist-container'>{''.join(cards)}</div>"
 
 
 st.set_page_config(
@@ -251,10 +385,16 @@ st.markdown(
     .metric-card {{
         background: var(--surface-0);
         border: 1px solid var(--border);
+        border-top: 3px solid var(--accent);
         padding: 1.15rem 1rem;
         border-radius: 14px;
         text-align: center;
         box-shadow: var(--card-shadow);
+        transition: all 0.2s ease;
+    }}
+    .metric-card:hover {{
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
     }}
     .metric-card h3 {{
         margin: 0;
@@ -296,7 +436,7 @@ st.markdown(
         line-height: 1.6 !important;
         background: var(--surface-0) !important;
         color: var(--fg-primary) !important;
-        border: 1px solid var(--border) !important;
+        border: 1.5px solid var(--border) !important;
         border-radius: 14px !important;
         padding: 14px 16px !important;
         box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.03), 0 1px 2px rgba(0, 0, 0, 0.02) !important;
@@ -308,7 +448,7 @@ st.markdown(
         outline: none !important;
     }}
 
-    /* ─── Horizontal Radio Buttons (Segmented Controls) ─── */
+    /* ─── Horizontal Radio Buttons: Clean Interactive Card Pills ─── */
     div[data-testid="stRadio"] label[data-testid="stWidgetLabel"] p,
     div[data-testid="stRadio"] label[data-testid="stWidgetLabel"] span {{
         color: var(--fg-primary) !important;
@@ -316,49 +456,217 @@ st.markdown(
         font-size: 0.95rem !important;
         margin-bottom: 6px !important;
     }}
+    div[data-testid="stRadioGroup"],
     div[data-testid="stRadio"] div[role="radiogroup"] {{
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: wrap !important;
-        gap: 6px !important;
-        background: var(--surface-3) !important;
-        padding: 5px !important;
-        border-radius: 12px !important;
+        gap: 8px !important;
+        background: var(--surface-2) !important;
+        padding: 6px 10px !important;
+        border-radius: 14px !important;
         border: 1px solid var(--border) !important;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02) !important;
     }}
-    div[data-testid="stRadio"] div[role="radiogroup"] > label {{
-        background: transparent !important;
-        border-radius: 8px !important;
+    div[data-testid="stRadioOption"],
+    div[data-testid="stRadioGroup"] > label,
+    div[data-testid="stRadio"] div[role="radiogroup"] > label,
+    div[data-testid="stRadio"] div[role="radiogroup"] > label[data-baseweb="radio"] {{
+        background: var(--surface-0) !important;
+        border: 1.5px solid var(--border) !important;
+        border-radius: 10px !important;
         padding: 6px 14px !important;
         margin: 0 !important;
         cursor: pointer !important;
-        border: 1px solid transparent !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
         display: inline-flex !important;
         align-items: center !important;
     }}
-    div[data-testid="stRadio"] div[role="radiogroup"] > label > div:first-child {{
-        display: none !important;
+    div[data-testid="stRadioOption"]:hover,
+    div[data-testid="stRadioOption"][data-hovered],
+    div[data-testid="stRadioGroup"] > label:hover,
+    div[data-testid="stRadio"] div[role="radiogroup"] > label:hover,
+    div[data-testid="stRadio"] div[role="radiogroup"] > label[data-baseweb="radio"]:hover {{
+        background: var(--surface-3) !important;
+        border-color: var(--border-hover) !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 10px var(--badge-bg) !important;
     }}
-    div[data-testid="stRadio"] div[role="radiogroup"] > label:hover {{
-        background: var(--surface-4) !important;
-    }}
-    div[data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked) {{
+    div[data-testid="stRadioOption"][data-selected="true"],
+    div[data-testid="stRadioOption"]:has([data-selected="true"]),
+    div[data-testid="stRadioOption"]:has(input:checked),
+    div[data-testid="stRadioGroup"] > label:has(input:checked),
+    div[data-testid="stRadio"] div[role="radiogroup"] > label[data-baseweb="radio"]:has(input:checked) {{
         background: var(--surface-0) !important;
-        border: 1px solid var(--border-hover) !important;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+        border: 1.5px solid var(--accent) !important;
+        box-shadow: 0 4px 14px var(--badge-bg) !important;
     }}
-    div[data-testid="stRadio"] div[role="radiogroup"] > label p,
-    div[data-testid="stRadio"] div[role="radiogroup"] > label span,
-    div[data-testid="stRadio"] div[role="radiogroup"] > label div {{
+
+    /* ─── Streamlit 1.61+ & BaseWeb Radio Circles: NO Solid Black / Grey Dots ─── */
+    div[data-testid="stRadioOption"] *,
+    label[data-baseweb="radio"] * {{
+        background-color: transparent !important;
+    }}
+    /* Outer Circle: Clean circle border */
+    div[data-testid="stRadioOption"] div[class*="etak9234"],
+    div[data-testid="stRadioOption"] > div > div:first-child,
+    label[data-baseweb="radio"] > div:first-child {{
+        background-color: var(--surface-0) !important;
+        border: 2px solid var(--border-hover) !important;
+        border-radius: 50% !important;
+        width: 18px !important;
+        height: 18px !important;
+        min-width: 18px !important;
+        min-height: 18px !important;
+        margin-right: 8px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }}
+    /* Outer Circle on Hover */
+    div[data-testid="stRadioOption"]:hover div[class*="etak9234"],
+    div[data-testid="stRadioOption"]:hover > div > div:first-child,
+    label[data-baseweb="radio"]:hover > div:first-child {{
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 4px var(--badge-bg) !important;
+        background-color: var(--surface-0) !important;
+    }}
+    /* Outer Circle Selected */
+    div[data-testid="stRadioOption"][data-selected="true"] div[class*="etak9234"],
+    div[data-testid="stRadioOption"][data-selected="true"] > div > div:first-child,
+    div[data-testid="stRadioOption"]:has(input:checked) div[class*="etak9234"],
+    div[data-testid="stRadioOption"]:has(input:checked) > div > div:first-child,
+    label[data-baseweb="radio"]:has(input:checked) > div:first-child {{
+        border-color: var(--accent) !important;
+        background-color: var(--accent) !important;
+        box-shadow: 0 0 0 4px var(--badge-bg) !important;
+    }}
+    /* Inner Dot - Unselected (MUST BE TRANSPARENT, NEVER BLACK!) */
+    div[data-testid="stRadioOption"] div[class*="etak9235"],
+    div[data-testid="stRadioOption"] > div > div:first-child > div,
+    label[data-baseweb="radio"] > div:first-child > div {{
+        background-color: transparent !important;
+        border-radius: 50% !important;
+        width: 8px !important;
+        height: 8px !important;
+        min-width: 8px !important;
+        min-height: 8px !important;
+        transition: all 0.2s ease !important;
+    }}
+    /* Inner Dot - Selected (White center circle) */
+    div[data-testid="stRadioOption"][data-selected="true"] div[class*="etak9235"],
+    div[data-testid="stRadioOption"][data-selected="true"] > div > div:first-child > div,
+    div[data-testid="stRadioOption"]:has(input:checked) div[class*="etak9235"],
+    div[data-testid="stRadioOption"]:has(input:checked) > div > div:first-child > div,
+    label[data-baseweb="radio"]:has(input:checked) > div:first-child > div,
+    label[data-baseweb="radio"] input:checked + div > div {{
+        background-color: #ffffff !important;
+    }}
+    /* Radio Option Text */
+    div[data-testid="stRadioOption"] p,
+    div[data-testid="stRadioOption"] span,
+    label[data-baseweb="radio"] p,
+    label[data-baseweb="radio"] span {{
         color: var(--fg-secondary) !important;
         font-weight: 600 !important;
-        font-size: 0.88rem !important;
+        font-size: 0.9rem !important;
+        transition: color 0.2s ease !important;
     }}
-    div[data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked) p,
-    div[data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked) span {{
+    div[data-testid="stRadioOption"]:hover p,
+    div[data-testid="stRadioOption"]:hover span,
+    label[data-baseweb="radio"]:hover p,
+    label[data-baseweb="radio"]:hover span {{
+        color: var(--accent) !important;
+    }}
+    div[data-testid="stRadioOption"][data-selected="true"] p,
+    div[data-testid="stRadioOption"][data-selected="true"] span,
+    div[data-testid="stRadioOption"]:has(input:checked) p,
+    div[data-testid="stRadioOption"]:has(input:checked) span,
+    label[data-baseweb="radio"]:has(input:checked) p,
+    label[data-baseweb="radio"]:has(input:checked) span {{
         color: var(--accent) !important;
         font-weight: 700 !important;
+    }}
+
+    /* ─── Checkbox Styling: NO Grey Hover Blobs ─── */
+    div[data-testid="stCheckbox"],
+    div[data-testid="stCheckbox"] .react-aria-Checkbox,
+    div[data-testid="stCheckbox"] label,
+    label[data-baseweb="checkbox"] {{
+        background-color: transparent !important;
+        background: transparent !important;
+        cursor: pointer !important;
+        border-radius: 8px !important;
+        transition: all 0.2s ease !important;
+    }}
+    /* Clean soft hover glow instead of dark/grey blob */
+    div[data-testid="stCheckbox"]:hover,
+    div[data-testid="stCheckbox"] .react-aria-Checkbox:hover,
+    div[data-testid="stCheckbox"] .react-aria-Checkbox[data-hovered],
+    div[data-testid="stCheckbox"] label:hover,
+    div[data-testid="stCheckbox"] div[data-hovered],
+    label[data-baseweb="checkbox"]:hover {{
+        background-color: var(--badge-bg) !important;
+        background: var(--badge-bg) !important;
+    }}
+    /* Checkbox Outer Square */
+    div[data-testid="stCheckbox"] .react-aria-Checkbox > div:first-child,
+    div[data-testid="stCheckbox"] input[type="checkbox"] + div,
+    label[data-baseweb="checkbox"] > div:first-child {{
+        background-color: var(--surface-0) !important;
+        border: 2px solid var(--border-hover) !important;
+        border-radius: 6px !important;
+        width: 18px !important;
+        height: 18px !important;
+        min-width: 18px !important;
+        min-height: 18px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+    }}
+    /* Checkbox Hover: Soft Colored Aura, NO GREY! */
+    div[data-testid="stCheckbox"] .react-aria-Checkbox:hover > div:first-child,
+    div[data-testid="stCheckbox"] .react-aria-Checkbox[data-hovered] > div:first-child,
+    div[data-testid="stCheckbox"] label:hover > div:first-child,
+    label[data-baseweb="checkbox"]:hover > div:first-child {{
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 4px var(--badge-bg) !important;
+        background-color: var(--surface-0) !important;
+    }}
+    /* Checkbox Checked: Rich Accent Fill */
+    div[data-testid="stCheckbox"] .react-aria-Checkbox[data-selected="true"] > div:first-child,
+    div[data-testid="stCheckbox"] input:checked + div,
+    label[data-baseweb="checkbox"]:has(input:checked) > div:first-child,
+    label[data-baseweb="checkbox"] input:checked + div {{
+        background: var(--primary-btn-bg) !important;
+        border-color: transparent !important;
+        box-shadow: 0 2px 8px var(--badge-bg) !important;
+    }}
+    div[data-testid="stCheckbox"] svg,
+    label[data-baseweb="checkbox"] svg {{
+        stroke: #ffffff !important;
+        stroke-width: 3.5 !important;
+        fill: none !important;
+    }}
+    div[data-testid="stCheckbox"] p,
+    div[data-testid="stCheckbox"] span,
+    label[data-baseweb="checkbox"] p,
+    label[data-baseweb="checkbox"] span {{
+        color: var(--fg-primary) !important;
+        font-weight: 500 !important;
+        font-size: 0.9rem !important;
+        transition: color 0.2s ease !important;
+    }}
+    div[data-testid="stCheckbox"]:hover p,
+    div[data-testid="stCheckbox"]:hover span,
+    label[data-baseweb="checkbox"]:hover p,
+    label[data-baseweb="checkbox"]:hover span {{
+        color: var(--accent) !important;
     }}
 
     /* ─── Buttons: Primary & Secondary ─── */
@@ -453,37 +761,57 @@ st.markdown(
         padding: 1.2rem !important;
     }}
 
-    /* ─── Dropdowns & Selectbox ─── */
-    div[data-baseweb="select"] > div {{
+    /* ─── Complete Dropdowns & Selectbox (Always High-Contrast) ─── */
+    div[data-testid="stSelectbox"] label p,
+    div[data-testid="stSelectbox"] label span {{
+        color: var(--fg-primary) !important;
+        font-weight: 700 !important;
+        font-size: 0.9rem !important;
+    }}
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] {{
         background-color: var(--surface-0) !important;
-        border: 1px solid var(--border) !important;
-        border-radius: 10px !important;
-        color: var(--fg-primary) !important;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+        border-radius: 12px !important;
     }}
-    div[data-baseweb="select"] > div:hover {{
-        border-color: var(--border-hover) !important;
-    }}
-    div[data-baseweb="select"] * {{
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {{
+        background-color: var(--surface-0) !important;
+        border: 1.5px solid var(--border) !important;
+        border-radius: 12px !important;
         color: var(--fg-primary) !important;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03) !important;
+        transition: all 0.2s ease !important;
+    }}
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div:hover {{
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px var(--badge-bg) !important;
+    }}
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] div,
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] span,
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] p {{
+        background-color: transparent !important;
+        color: var(--fg-primary) !important;
+    }}
+    div[data-testid="stSelectbox"] svg {{
+        fill: var(--fg-secondary) !important;
     }}
     div[data-baseweb="popover"],
     ul[role="listbox"] {{
         background-color: var(--surface-0) !important;
-        border: 1px solid var(--border) !important;
-        border-radius: 10px !important;
+        border: 1.5px solid var(--border) !important;
+        border-radius: 12px !important;
         box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12) !important;
     }}
     li[role="option"] {{
         background-color: var(--surface-0) !important;
         color: var(--fg-primary) !important;
-        padding: 8px 14px !important;
+        padding: 9px 15px !important;
+        font-size: 0.9rem !important;
         transition: all 0.15s ease !important;
     }}
     li[role="option"]:hover,
     li[aria-selected="true"] {{
         background-color: var(--surface-3) !important;
         color: var(--accent) !important;
+        font-weight: 600 !important;
     }}
 
     /* ─── File Uploader ─── */
@@ -728,6 +1056,272 @@ st.markdown(
         border-color: var(--border) !important;
         border-radius: 12px !important;
     }}
+
+    /* ─── Sidebar Multi-Agent Colorful Roster ─── */
+    .agent-roster-list {{
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        margin-top: 8px;
+        margin-bottom: 6px;
+    }}
+    .agent-roster-item {{
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 0.84rem;
+        font-weight: 500;
+        color: var(--fg-primary) !important;
+        padding: 6px 10px;
+        border-radius: 9px;
+        background: var(--surface-1);
+        border: 1px solid var(--border);
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    }}
+    .agent-roster-item:hover {{
+        background: var(--surface-3);
+        border-color: var(--border-hover);
+        transform: translateX(3px);
+        box-shadow: 0 3px 8px var(--badge-bg);
+    }}
+    .agent-badge {{
+        font-weight: 700;
+        font-size: 0.72rem;
+        padding: 2px 7px;
+        border-radius: 6px;
+        letter-spacing: 0.3px;
+        white-space: nowrap;
+        display: inline-block;
+    }}
+    .ab-amber {{ background: rgba(245, 158, 11, 0.14); color: #d97706; border: 1px solid rgba(245, 158, 11, 0.35); }}
+    .ab-sky {{ background: rgba(14, 165, 233, 0.14); color: #0284c7; border: 1px solid rgba(14, 165, 233, 0.35); }}
+    .ab-emerald {{ background: rgba(16, 185, 129, 0.14); color: #059669; border: 1px solid rgba(16, 185, 129, 0.35); }}
+    .ab-rose {{ background: rgba(244, 63, 94, 0.14); color: #e11d48; border: 1px solid rgba(244, 63, 94, 0.35); }}
+    .ab-purple {{ background: rgba(168, 85, 247, 0.14); color: #7c3aed; border: 1px solid rgba(168, 85, 247, 0.35); }}
+
+    /* ─── GitHub-Grade Diff Viewer Component ─── */
+    .diff-viewer-card {{
+        background: var(--surface-0);
+        border: 1.5px solid var(--border);
+        border-radius: 14px;
+        overflow: hidden;
+        margin-top: 1rem;
+        margin-bottom: 1.5rem;
+        box-shadow: var(--card-shadow);
+        font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+        font-size: 0.88rem;
+    }}
+    .diff-viewer-header {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.75rem 1.2rem;
+        background: var(--surface-1);
+        border-bottom: 1px solid var(--border);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }}
+    .diff-header-left {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 700;
+        font-size: 0.95rem;
+        color: var(--fg-primary);
+    }}
+    .diff-header-right {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }}
+    .diff-pill {{
+        font-size: 0.78rem;
+        font-weight: 700;
+        padding: 3px 9px;
+        border-radius: 9999px;
+    }}
+    .diff-pill-add {{
+        background: rgba(34, 197, 94, 0.15);
+        color: #16a34a;
+        border: 1px solid rgba(34, 197, 94, 0.35);
+    }}
+    .diff-pill-del {{
+        background: rgba(239, 68, 68, 0.15);
+        color: #dc2626;
+        border: 1px solid rgba(239, 68, 68, 0.35);
+    }}
+    .diff-content-scroll {{
+        max-height: 480px;
+        overflow-y: auto;
+        overflow-x: auto;
+        background: var(--surface-0);
+        line-height: 1.55;
+    }}
+    .diff-line {{
+        display: flex;
+        align-items: flex-start;
+        padding: 3px 14px;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }}
+    .diff-gutter {{
+        width: 24px;
+        min-width: 24px;
+        user-select: none;
+        font-weight: 700;
+        color: var(--fg-secondary);
+        opacity: 0.8;
+    }}
+    .diff-text {{
+        flex: 1;
+    }}
+    .diff-add {{
+        background-color: rgba(34, 197, 94, 0.12) !important;
+        border-left: 4px solid #16a34a !important;
+    }}
+    .diff-add .diff-gutter {{
+        color: #16a34a !important;
+    }}
+    .diff-add .diff-text {{
+        color: #15803d !important;
+        font-weight: 600;
+    }}
+    .diff-del {{
+        background-color: rgba(239, 68, 68, 0.10) !important;
+        border-left: 4px solid #dc2626 !important;
+    }}
+    .diff-del .diff-gutter {{
+        color: #dc2626 !important;
+    }}
+    .diff-del .diff-text {{
+        color: #b91c1c !important;
+        text-decoration: line-through;
+        opacity: 0.9;
+    }}
+    .diff-hunk {{
+        background-color: rgba(99, 102, 241, 0.10) !important;
+        border-top: 1px dashed var(--border);
+        border-bottom: 1px dashed var(--border);
+        padding-top: 4px;
+        padding-bottom: 4px;
+    }}
+    .diff-hunk .diff-gutter {{
+        color: #6366f1 !important;
+    }}
+    .diff-hunk .diff-text {{
+        color: #4f46e5 !important;
+        font-weight: 700;
+    }}
+    .diff-file-header {{
+        background-color: var(--surface-2) !important;
+        font-weight: 700;
+        color: var(--fg-secondary) !important;
+        border-bottom: 1px solid var(--border);
+    }}
+    .diff-ctx {{
+        background-color: transparent;
+        color: var(--fg-primary) !important;
+    }}
+
+    /* ─── Modern Glassmorphic Checklist Cards ─── */
+    .checklist-container {{
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 8px;
+        margin-bottom: 1rem;
+    }}
+    .checklist-card {{
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+        padding: 12px 16px;
+        border-radius: 12px;
+        background: var(--surface-0);
+        border: 1.5px solid var(--border);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }}
+    .checklist-card:hover {{
+        transform: translateY(-1.5px);
+        box-shadow: 0 6px 16px var(--badge-bg);
+        border-color: var(--border-hover);
+    }}
+    .cl-icon {{
+        width: 30px;
+        height: 30px;
+        min-width: 30px;
+        min-height: 30px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: 800;
+    }}
+    .cl-icon-check {{
+        background: rgba(34, 197, 94, 0.15);
+        color: #16a34a;
+        border: 1.5px solid rgba(34, 197, 94, 0.35);
+    }}
+    .cl-icon-eco {{
+        background: rgba(14, 165, 233, 0.15);
+        color: #0284c7;
+        border: 1.5px solid rgba(14, 165, 233, 0.35);
+    }}
+    .cl-icon-bulb {{
+        background: rgba(245, 158, 11, 0.15);
+        color: #d97706;
+        border: 1.5px solid rgba(245, 158, 11, 0.35);
+    }}
+    .cl-body {{
+        flex: 1;
+    }}
+    .cl-header-row {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 4px;
+    }}
+    .cl-badge {{
+        font-size: 0.74rem;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 6px;
+        letter-spacing: 0.3px;
+    }}
+    .cl-badge-cwe {{
+        background: rgba(239, 68, 68, 0.12);
+        color: #dc2626;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+    }}
+    .cl-badge-status {{
+        background: rgba(34, 197, 94, 0.12);
+        color: #16a34a;
+        border: 1px solid rgba(34, 197, 94, 0.3);
+    }}
+    .cl-badge-speedup {{
+        background: rgba(14, 165, 233, 0.12);
+        color: #0284c7;
+        border: 1px solid rgba(14, 165, 233, 0.3);
+    }}
+    .cl-badge-verified {{
+        background: rgba(124, 58, 237, 0.12);
+        color: #7c3aed;
+        border: 1px solid rgba(124, 58, 237, 0.3);
+    }}
+    .cl-badge-advice {{
+        background: rgba(245, 158, 11, 0.12);
+        color: #d97706;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+    }}
+    .cl-desc {{
+        color: var(--fg-primary) !important;
+        font-size: 0.9rem;
+        line-height: 1.45;
+        font-weight: 500;
+    }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -895,12 +1489,15 @@ with st.sidebar:
     st.markdown("### 🤖 Multi-Agent Engine")
     st.markdown(
         """
-        - **Agent 0:** Self-Healing Guard
-        - **Agent 1:** Structural AST/PDG Inspector
-        - **Agent 2:** Green Computing Auditor
-        - **Agent 3:** Security Threat Hunter (40+ CWEs)
-        - **Agent 4:** Multi-Level Communicator
-        """
+        <div class="agent-roster-list">
+          <div class="agent-roster-item"><span class="agent-badge ab-amber">Agent 0</span> <span>Self-Healing Guard</span></div>
+          <div class="agent-roster-item"><span class="agent-badge ab-sky">Agent 1</span> <span>AST & PDG Inspector</span></div>
+          <div class="agent-roster-item"><span class="agent-badge ab-emerald">Agent 2</span> <span>Green Computing Auditor</span></div>
+          <div class="agent-roster-item"><span class="agent-badge ab-rose">Agent 3</span> <span>Threat Hunter (40+ CWEs)</span></div>
+          <div class="agent-roster-item"><span class="agent-badge ab-purple">Agent 4</span> <span>Multi-Level Communicator</span></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
     st.markdown("---")
     st.caption("Active LLM Backend: Groq / `qwen/qwen3.8-27b`")
@@ -1631,8 +2228,7 @@ if ctx is not None or opt is not None:
             # Remediation Summary
             if sec.get("remediations"):
                 st.markdown("#### 💡 Automated Hardening Advice")
-                for rem in sec.get("remediations", []):
-                    st.write(f"- {rem}")
+                st.markdown(render_advice_checklist(sec.get("remediations", []), icon="🛡️", badge="SECURITY ADVICE"), unsafe_allow_html=True)
 
     # ─────────────────────────────────────────────────────────────
     # TAB 3: Static & High-Contrast PDG Graph
@@ -1717,8 +2313,7 @@ if ctx is not None or opt is not None:
             st.info(green.get("summary", ""))
 
             st.markdown("#### Recommendations for Sustainable Code")
-            for rec in green.get("recommendations", []):
-                st.write(f"- {rec}")
+            st.markdown(render_advice_checklist(green.get("recommendations", []), icon="🍃", badge="GREEN COMPUTING"), unsafe_allow_html=True)
 
             # Charts
             if "chart_data" in green:
@@ -1793,19 +2388,14 @@ if ctx is not None or opt is not None:
 
             # Unified Diff
             if opt.diff:
-                with st.expander("🔍 View Unified Code Diff", expanded=True):
-                    st.code(opt.diff, language="diff")
+                with st.expander("🔍 View Visual Unified Code Diff (Patch View)", expanded=True):
+                    st.markdown(render_diff_html(opt.diff), unsafe_allow_html=True)
 
             # Improvements breakdown
             b1, b2 = st.columns(2)
             with b1:
                 st.markdown("#### 🛡️ Security Fixes Applied")
-                if opt.vulnerabilities_fixed:
-                    for v in opt.vulnerabilities_fixed:
-                        st.success(f"Fixed: {v}")
-                else:
-                    st.write("No security vulnerabilities required patching.")
+                st.markdown(render_security_checklist(opt.vulnerabilities_fixed), unsafe_allow_html=True)
             with b2:
                 st.markdown("#### 🌿 Algorithmic Improvements")
-                for a in opt.algorithmic_improvements:
-                    st.info(f"Speedup: {a}")
+                st.markdown(render_improvements_checklist(opt.algorithmic_improvements), unsafe_allow_html=True)

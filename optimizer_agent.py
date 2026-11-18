@@ -802,16 +802,16 @@ Source Code:
         return improvements
 
     def _generate_unified_diff(self, original: str, optimized: str) -> str:
-        orig_lines = original.strip().splitlines(keepends=True)
-        opt_lines = optimized.strip().splitlines(keepends=True)
-        diff = difflib.unified_diff(
+        orig_lines = original.strip().splitlines(keepends=False)
+        opt_lines = optimized.strip().splitlines(keepends=False)
+        diff = list(difflib.unified_diff(
             orig_lines,
             opt_lines,
             fromfile="original.py",
             tofile="optimized.py",
             lineterm=""
-        )
-        return "".join(diff)
+        ))
+        return "\n".join(diff)
 
 
 def optimize_code(
