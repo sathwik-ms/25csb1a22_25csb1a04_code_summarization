@@ -33,374 +33,537 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom Styling (Dark/Modern Glassmorphism)
-st.markdown(
-    """
-    <style>
-    .stApp {
-        background: radial-gradient(circle at top right, #0f172a, #0b1120 40%, #030712 100%);
-        color: #f8fafc;
+# ─── Theme Toggle (persisted in session state) ───
+if "theme_mode" not in st.session_state:
+    st.session_state.theme_mode = "dark"
+
+_theme = st.session_state.theme_mode  # "dark" or "light"
+_is_dark = _theme == "dark"
+
+# ─── CSS Custom Properties: One palette per theme ───
+if _is_dark:
+    _css_vars = """
+    :root {
+        --bg-app: radial-gradient(circle at top right, #0f172a, #0b1120 40%, #030712 100%);
+        --fg-primary: #f8fafc;
+        --fg-secondary: #94a3b8;
+        --fg-muted: #cbd5e1;
+        --accent: #38bdf8;
+        --accent-hover: #38bdf8;
+        --surface-0: #030712;
+        --surface-1: #0b1120;
+        --surface-2: #0f172a;
+        --surface-3: #1e293b;
+        --surface-4: #334155;
+        --surface-5: #475569;
+        --border: #334155;
+        --border-hover: #38bdf8;
+        --hero-bg: linear-gradient(135deg, #1e293b 0%, #0f172a 50%, #1e1b4b 100%);
+        --hero-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        --hero-title-gradient: linear-gradient(90deg, #38bdf8, #818cf8, #c084fc);
+        --badge-bg: rgba(56, 189, 248, 0.12);
+        --badge-border: rgba(56, 189, 248, 0.3);
+        --card-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        --trace-bg: #111827;
+        --trace-border: #3b82f6;
+        --heal-card-bg: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        --heal-label-bg: rgba(15, 23, 42, 0.85);
+        --pill-before-bg: rgba(239, 68, 68, 0.2);
+        --pill-before-fg: #fca5a5;
+        --pill-after-bg: rgba(34, 197, 94, 0.2);
+        --pill-after-fg: #86efac;
+        --arrow-pill-bg: #0f172a;
+        --code-before-fg: #fca5a5;
+        --code-after-fg: #86efac;
+        --heal-badge-line-bg: rgba(56, 189, 248, 0.15);
+        --heal-badge-line-border: rgba(56, 189, 248, 0.4);
+        --heal-badge-rule-bg: rgba(129, 140, 248, 0.15);
+        --heal-badge-rule-border: rgba(129, 140, 248, 0.4);
+        --heal-badge-rule-fg: #a5b4fc;
+        --heal-badge-status-bg: rgba(34, 197, 94, 0.15);
+        --heal-badge-status-border: rgba(34, 197, 94, 0.4);
+        --heal-badge-status-fg: #86efac;
+        --before-border: rgba(239, 68, 68, 0.35);
+        --before-bg: rgba(239, 68, 68, 0.04);
+        --after-border: rgba(34, 197, 94, 0.35);
+        --after-bg: rgba(34, 197, 94, 0.04);
+        --primary-btn-bg: linear-gradient(90deg, #f43f5e 0%, #fb7185 100%);
+        --primary-btn-hover: linear-gradient(90deg, #e11d48 0%, #f43f5e 100%);
+        --sidebar-bg: #0f172a;
     }
-    .hero-banner {
+    """
+else:
+    _css_vars = """
+    :root {
+        --bg-app: linear-gradient(135deg, #f8fafc 0%, #eef2f7 40%, #e2e8f0 100%);
+        --fg-primary: #0f172a;
+        --fg-secondary: #475569;
+        --fg-muted: #334155;
+        --accent: #2563eb;
+        --accent-hover: #1d4ed8;
+        --surface-0: #ffffff;
+        --surface-1: #f8fafc;
+        --surface-2: #f1f5f9;
+        --surface-3: #e2e8f0;
+        --surface-4: #cbd5e1;
+        --surface-5: #94a3b8;
+        --border: #cbd5e1;
+        --border-hover: #2563eb;
+        --hero-bg: linear-gradient(135deg, #e2e8f0 0%, #f1f5f9 50%, #ede9fe 100%);
+        --hero-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+        --hero-title-gradient: linear-gradient(90deg, #2563eb, #7c3aed, #a855f7);
+        --badge-bg: rgba(37, 99, 235, 0.08);
+        --badge-border: rgba(37, 99, 235, 0.25);
+        --card-shadow: 0 4px 15px rgba(0, 0, 0, 0.06);
+        --trace-bg: #f1f5f9;
+        --trace-border: #3b82f6;
+        --heal-card-bg: linear-gradient(135deg, #e2e8f0 0%, #f1f5f9 100%);
+        --heal-label-bg: rgba(241, 245, 249, 0.95);
+        --pill-before-bg: rgba(239, 68, 68, 0.1);
+        --pill-before-fg: #dc2626;
+        --pill-after-bg: rgba(34, 197, 94, 0.1);
+        --pill-after-fg: #16a34a;
+        --arrow-pill-bg: #f1f5f9;
+        --code-before-fg: #dc2626;
+        --code-after-fg: #16a34a;
+        --heal-badge-line-bg: rgba(37, 99, 235, 0.08);
+        --heal-badge-line-border: rgba(37, 99, 235, 0.3);
+        --heal-badge-rule-bg: rgba(124, 58, 237, 0.08);
+        --heal-badge-rule-border: rgba(124, 58, 237, 0.3);
+        --heal-badge-rule-fg: #7c3aed;
+        --heal-badge-status-bg: rgba(22, 163, 74, 0.08);
+        --heal-badge-status-border: rgba(22, 163, 74, 0.3);
+        --heal-badge-status-fg: #16a34a;
+        --before-border: rgba(220, 38, 38, 0.3);
+        --before-bg: rgba(220, 38, 38, 0.04);
+        --after-border: rgba(22, 163, 74, 0.3);
+        --after-bg: rgba(22, 163, 74, 0.04);
+        --primary-btn-bg: linear-gradient(90deg, #f43f5e 0%, #fb7185 100%);
+        --primary-btn-hover: linear-gradient(90deg, #e11d48 0%, #f43f5e 100%);
+        --sidebar-bg: #f1f5f9;
+    }
+    """
+
+# Custom Styling (Glassmorphism — var-driven for Light/Dark)
+st.markdown(
+    f"""
+    <style>
+    {_css_vars}
+    .stApp {{
+        background: var(--bg-app);
+        color: var(--fg-primary);
+    }}
+    /* Sidebar */
+    section[data-testid="stSidebar"],
+    section[data-testid="stSidebar"] > div {{
+        background-color: var(--surface-2) !important;
+        color: var(--fg-primary) !important;
+    }}
+    section[data-testid="stSidebar"] .stMarkdown,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3 {{
+        color: var(--fg-primary) !important;
+    }}
+    .hero-banner {{
         padding: 1.4rem 1.8rem;
         border-radius: 16px;
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 50%, #1e1b4b 100%);
-        border: 1px solid #334155;
-        color: #f8fafc;
+        background: var(--hero-bg);
+        border: 1px solid var(--border);
+        color: var(--fg-primary);
         margin-bottom: 1.5rem;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    }
-    .hero-banner h1 {
+        box-shadow: var(--hero-shadow);
+    }}
+    .hero-banner h1 {{
         margin: 0;
         font-size: 1.85rem;
         font-weight: 800;
         letter-spacing: -0.5px;
-        background: linear-gradient(90deg, #38bdf8, #818cf8, #c084fc);
+        background: var(--hero-title-gradient);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-    }
-    .hero-banner p {
+    }}
+    .hero-banner p {{
         margin: 0.4rem 0 0 0;
         font-size: 0.95rem;
-        color: #94a3b8;
-    }
-    .author-badge {
+        color: var(--fg-secondary);
+    }}
+    .author-badge {{
         display: inline-block;
         margin-top: 0.5rem;
         padding: 0.2rem 0.75rem;
         border-radius: 9999px;
-        background: rgba(56, 189, 248, 0.12);
-        border: 1px solid rgba(56, 189, 248, 0.3);
-        color: #38bdf8;
+        background: var(--badge-bg);
+        border: 1px solid var(--badge-border);
+        color: var(--accent);
         font-size: 0.8rem;
         font-weight: 600;
-    }
-    .metric-card {
-        background: #1e293b;
-        border: 1px solid #334155;
+    }}
+    .metric-card {{
+        background: var(--surface-3);
+        border: 1px solid var(--border);
         padding: 1rem;
         border-radius: 12px;
         text-align: center;
-    }
-    .metric-card h3 {
+    }}
+    .metric-card h3 {{
         margin: 0;
         font-size: 1.8rem;
-        color: #38bdf8;
-    }
-    .metric-card span {
+        color: var(--accent);
+    }}
+    .metric-card span {{
         font-size: 0.82rem;
-        color: #94a3b8;
+        color: var(--fg-secondary);
         text-transform: uppercase;
-    }
-    .agent-trace-box {
-        background: #111827;
-        border-left: 4px solid #3b82f6;
+    }}
+    .agent-trace-box {{
+        background: var(--trace-bg);
+        border-left: 4px solid var(--trace-border);
         padding: 0.6rem 0.9rem;
         border-radius: 0 8px 8px 0;
         margin-bottom: 0.5rem;
         font-size: 0.88rem;
-    }
-    .stTextArea textarea {
+    }}
+    .stTextArea textarea {{
         font-family: Consolas, monospace !important;
         font-size: 0.88rem !important;
-        background: #0f172a !important;
-        color: #e2e8f0 !important;
-        border: 1px solid #334155 !important;
-    }
+        background: var(--surface-2) !important;
+        color: var(--fg-primary) !important;
+        border: 1px solid var(--border) !important;
+    }}
 
-    /* ─── Streamlit Widget Overrides (Force Consistent Dark Theme) ─── */
-    /* Buttons: Secondary button default and hover */
-    .stButton > button, 
+    /* ─── Streamlit Widget Overrides (Force Consistent Theme) ─── */
+    .stButton > button,
     button[kind="secondary"],
-    button[data-testid="baseButton-secondary"] {
-        background-color: #1e293b !important;
-        color: #f8fafc !important;
-        border: 1px solid #475569 !important;
+    button[data-testid="baseButton-secondary"] {{
+        background-color: var(--surface-3) !important;
+        color: var(--fg-primary) !important;
+        border: 1px solid var(--surface-5) !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
         transition: all 0.2s ease-in-out !important;
-    }
-    .stButton > button:hover, 
+    }}
+    .stButton > button:hover,
     button[kind="secondary"]:hover,
-    button[data-testid="baseButton-secondary"]:hover {
-        background-color: #334155 !important;
-        color: #38bdf8 !important;
-        border-color: #38bdf8 !important;
-    }
+    button[data-testid="baseButton-secondary"]:hover {{
+        background-color: var(--surface-4) !important;
+        color: var(--accent) !important;
+        border-color: var(--accent) !important;
+    }}
     .stButton > button:active,
-    button[kind="secondary"]:active {
-        background-color: #0f172a !important;
-    }
-
-    /* Primary Button */
+    button[kind="secondary"]:active {{
+        background-color: var(--surface-2) !important;
+    }}
     .stButton > button[kind="primary"],
-    button[data-testid="baseButton-primary"] {
-        background: linear-gradient(90deg, #f43f5e 0%, #fb7185 100%) !important;
+    button[data-testid="baseButton-primary"] {{
+        background: var(--primary-btn-bg) !important;
         color: #ffffff !important;
         border: none !important;
         border-radius: 8px !important;
         font-weight: 700 !important;
-    }
+    }}
     .stButton > button[kind="primary"]:hover,
-    button[data-testid="baseButton-primary"]:hover {
-        background: linear-gradient(90deg, #e11d48 0%, #f43f5e 100%) !important;
+    button[data-testid="baseButton-primary"]:hover {{
+        background: var(--primary-btn-hover) !important;
         color: #ffffff !important;
-    }
+    }}
 
-    /* Expanders: Ensure dark header and visible text whether hovered or unhovered */
+    /* Expanders */
     div[data-testid="stExpander"],
-    .streamlit-expander {
-        background-color: #0f172a !important;
-        border: 1px solid #334155 !important;
+    .streamlit-expander {{
+        background-color: var(--surface-2) !important;
+        border: 1px solid var(--border) !important;
         border-radius: 12px !important;
         overflow: hidden !important;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3) !important;
-    }
+        box-shadow: var(--card-shadow) !important;
+    }}
     div[data-testid="stExpander"] details,
-    div[data-testid="stExpander"] details summary {
-        background-color: #1e293b !important;
-        color: #f8fafc !important;
+    div[data-testid="stExpander"] details summary {{
+        background-color: var(--surface-3) !important;
+        color: var(--fg-primary) !important;
         border: none !important;
         border-radius: 0px !important;
         transition: background-color 0.2s ease !important;
-    }
-    div[data-testid="stExpander"] details summary:hover {
-        background-color: #273549 !important;
-        color: #38bdf8 !important;
-    }
+    }}
+    div[data-testid="stExpander"] details summary:hover {{
+        background-color: var(--surface-4) !important;
+        color: var(--accent) !important;
+    }}
     div[data-testid="stExpander"] details summary p,
     div[data-testid="stExpander"] details summary span,
-    div[data-testid="stExpander"] details summary svg {
-        color: #f8fafc !important;
-        fill: #f8fafc !important;
-    }
+    div[data-testid="stExpander"] details summary svg {{
+        color: var(--fg-primary) !important;
+        fill: var(--fg-primary) !important;
+    }}
     div[data-testid="stExpander"] details summary:hover p,
-    div[data-testid="stExpander"] details summary:hover span {
-        color: #38bdf8 !important;
-    }
-    div[data-testid="stExpander"] details summary:hover svg {
-        fill: #38bdf8 !important;
-    }
-    div[data-testid="stExpander"] div[data-testid="stExpanderDetails"] {
-        background-color: #0b1120 !important;
-        color: #cbd5e1 !important;
-        border-top: 1px solid #334155 !important;
+    div[data-testid="stExpander"] details summary:hover span {{
+        color: var(--accent) !important;
+    }}
+    div[data-testid="stExpander"] details summary:hover svg {{
+        fill: var(--accent) !important;
+    }}
+    div[data-testid="stExpander"] div[data-testid="stExpanderDetails"] {{
+        background-color: var(--surface-1) !important;
+        color: var(--fg-muted) !important;
+        border-top: 1px solid var(--border) !important;
         padding: 1rem !important;
-    }
+    }}
 
-    /* File Uploader: Dropzone styling */
-    div[data-testid="stFileUploader"] {
+    /* File Uploader */
+    div[data-testid="stFileUploader"] {{
         background: transparent !important;
-    }
+    }}
     div[data-testid="stFileUploader"] section[data-testid="stFileUploadDropzone"],
-    div[data-testid="stFileUploader"] section {
-        background-color: #0f172a !important;
-        border: 1px dashed #475569 !important;
+    div[data-testid="stFileUploader"] section {{
+        background-color: var(--surface-2) !important;
+        border: 1px dashed var(--surface-5) !important;
         border-radius: 10px !important;
-        color: #cbd5e1 !important;
+        color: var(--fg-muted) !important;
         transition: border-color 0.2s ease !important;
-    }
-    div[data-testid="stFileUploader"] section:hover {
-        border-color: #38bdf8 !important;
-        background-color: #162032 !important;
-    }
-    div[data-testid="stFileUploader"] section button {
-        background-color: #1e293b !important;
-        color: #f8fafc !important;
-        border: 1px solid #475569 !important;
+    }}
+    div[data-testid="stFileUploader"] section:hover {{
+        border-color: var(--accent) !important;
+        background-color: var(--surface-3) !important;
+    }}
+    div[data-testid="stFileUploader"] section button {{
+        background-color: var(--surface-3) !important;
+        color: var(--fg-primary) !important;
+        border: 1px solid var(--surface-5) !important;
         border-radius: 6px !important;
-    }
-    div[data-testid="stFileUploader"] section button:hover {
-        background-color: #334155 !important;
-        color: #38bdf8 !important;
-        border-color: #38bdf8 !important;
-    }
+    }}
+    div[data-testid="stFileUploader"] section button:hover {{
+        background-color: var(--surface-4) !important;
+        color: var(--accent) !important;
+        border-color: var(--accent) !important;
+    }}
     div[data-testid="stFileUploader"] span,
     div[data-testid="stFileUploader"] small,
-    div[data-testid="stFileUploader"] p {
-        color: #94a3b8 !important;
-    }
+    div[data-testid="stFileUploader"] p {{
+        color: var(--fg-secondary) !important;
+    }}
 
     /* Selectbox & Popovers */
-    div[data-baseweb="select"] > div {
-        background-color: #0f172a !important;
-        border-color: #334155 !important;
-        color: #f8fafc !important;
-    }
-    div[data-baseweb="select"] * {
-        color: #f8fafc !important;
-    }
+    div[data-baseweb="select"] > div {{
+        background-color: var(--surface-2) !important;
+        border-color: var(--border) !important;
+        color: var(--fg-primary) !important;
+    }}
+    div[data-baseweb="select"] * {{
+        color: var(--fg-primary) !important;
+    }}
     div[data-baseweb="popover"],
-    ul[role="listbox"] {
-        background-color: #0f172a !important;
-        border: 1px solid #334155 !important;
-    }
-    li[role="option"] {
-        background-color: #0f172a !important;
-        color: #f8fafc !important;
-    }
+    ul[role="listbox"] {{
+        background-color: var(--surface-2) !important;
+        border: 1px solid var(--border) !important;
+    }}
+    li[role="option"] {{
+        background-color: var(--surface-2) !important;
+        color: var(--fg-primary) !important;
+    }}
     li[role="option"]:hover,
-    li[aria-selected="true"] {
-        background-color: #1e293b !important;
-        color: #38bdf8 !important;
-    }
-    .heal-patch-card {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border: 1px solid #334155;
+    li[aria-selected="true"] {{
+        background-color: var(--surface-3) !important;
+        color: var(--accent) !important;
+    }}
+
+    /* ─── Self-Healing Patch Cards ─── */
+    .heal-patch-card {{
+        background: var(--heal-card-bg);
+        border: 1px solid var(--border);
         border-radius: 12px;
         padding: 1.1rem 1.3rem;
         margin-bottom: 1rem;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
-    }
-    .heal-patch-header {
+        box-shadow: var(--card-shadow);
+    }}
+    .heal-patch-header {{
         display: flex;
         align-items: center;
         gap: 0.6rem;
         flex-wrap: wrap;
         margin-bottom: 0.5rem;
-    }
-    .heal-badge-line {
-        background: rgba(56, 189, 248, 0.15);
-        border: 1px solid rgba(56, 189, 248, 0.4);
-        color: #38bdf8;
+    }}
+    .heal-badge-line {{
+        background: var(--heal-badge-line-bg);
+        border: 1px solid var(--heal-badge-line-border);
+        color: var(--accent);
         font-weight: 700;
         font-size: 0.78rem;
         padding: 0.2rem 0.65rem;
         border-radius: 6px;
         letter-spacing: 0.3px;
-    }
-    .heal-badge-rule {
-        background: rgba(129, 140, 248, 0.15);
-        border: 1px solid rgba(129, 140, 248, 0.4);
-        color: #a5b4fc;
+    }}
+    .heal-badge-rule {{
+        background: var(--heal-badge-rule-bg);
+        border: 1px solid var(--heal-badge-rule-border);
+        color: var(--heal-badge-rule-fg);
         font-weight: 600;
         font-size: 0.78rem;
         padding: 0.2rem 0.65rem;
         border-radius: 6px;
-    }
-    .heal-badge-status {
-        background: rgba(34, 197, 94, 0.15);
-        border: 1px solid rgba(34, 197, 94, 0.4);
-        color: #86efac;
+    }}
+    .heal-badge-status {{
+        background: var(--heal-badge-status-bg);
+        border: 1px solid var(--heal-badge-status-border);
+        color: var(--heal-badge-status-fg);
         font-weight: 700;
         font-size: 0.75rem;
         padding: 0.2rem 0.6rem;
         border-radius: 6px;
         text-transform: uppercase;
         margin-left: auto;
-    }
-    .heal-patch-desc {
-        color: #cbd5e1;
+    }}
+    .heal-patch-desc {{
+        color: var(--fg-muted);
         font-size: 0.88rem;
         margin-bottom: 0.85rem;
         line-height: 1.4;
-    }
-    .heal-state-grid {
+    }}
+    .heal-state-grid {{
         display: grid;
         grid-template-columns: 1fr auto 1fr;
         gap: 0.8rem;
         align-items: center;
-    }
-    @media (max-width: 768px) {
-        .heal-state-grid {
+    }}
+    @media (max-width: 768px) {{
+        .heal-state-grid {{
             grid-template-columns: 1fr;
-        }
-    }
-    .heal-state-col {
+        }}
+    }}
+    .heal-state-col {{
         border-radius: 8px;
         overflow: hidden;
-        border: 1px solid #334155;
-    }
-    .heal-state-before {
-        border-color: rgba(239, 68, 68, 0.35);
-        background: rgba(239, 68, 68, 0.04);
-    }
-    .heal-state-after {
-        border-color: rgba(34, 197, 94, 0.35);
-        background: rgba(34, 197, 94, 0.04);
-    }
-    .heal-state-label {
+        border: 1px solid var(--border);
+    }}
+    .heal-state-before {{
+        border-color: var(--before-border);
+        background: var(--before-bg);
+    }}
+    .heal-state-after {{
+        border-color: var(--after-border);
+        background: var(--after-bg);
+    }}
+    .heal-state-label {{
         display: flex;
         align-items: center;
         gap: 0.5rem;
         padding: 0.35rem 0.75rem;
         font-size: 0.75rem;
-        background: rgba(15, 23, 42, 0.85);
-        border-bottom: 1px solid #334155;
-    }
-    .pill-before {
-        background: rgba(239, 68, 68, 0.2);
-        color: #fca5a5;
-        border: 1px solid rgba(239, 68, 68, 0.4);
+        background: var(--heal-label-bg);
+        border-bottom: 1px solid var(--border);
+    }}
+    .pill-before {{
+        background: var(--pill-before-bg);
+        color: var(--pill-before-fg);
+        border: 1px solid var(--before-border);
         font-weight: 800;
         padding: 1px 6px;
         border-radius: 4px;
         font-size: 0.7rem;
-    }
-    .pill-after {
-        background: rgba(34, 197, 94, 0.2);
-        color: #86efac;
-        border: 1px solid rgba(34, 197, 94, 0.4);
+    }}
+    .pill-after {{
+        background: var(--pill-after-bg);
+        color: var(--pill-after-fg);
+        border: 1px solid var(--after-border);
         font-weight: 800;
         padding: 1px 6px;
         border-radius: 4px;
         font-size: 0.7rem;
-    }
-    .pill-state-sub {
-        color: #94a3b8;
+    }}
+    .pill-state-sub {{
+        color: var(--fg-secondary);
         font-size: 0.75rem;
-    }
-    .heal-code-box {
+    }}
+    .heal-code-box {{
         padding: 0.6rem 0.8rem;
         font-family: 'Consolas', 'Fira Code', monospace;
         font-size: 0.84rem;
         white-space: pre-wrap;
         word-break: break-all;
         line-height: 1.45;
-    }
-    .heal-state-before .heal-code-box {
-        color: #fca5a5;
-    }
-    .heal-state-after .heal-code-box {
-        color: #86efac;
-    }
-    .heal-transition-divider {
+    }}
+    .heal-state-before .heal-code-box {{
+        color: var(--code-before-fg);
+    }}
+    .heal-state-after .heal-code-box {{
+        color: var(--code-after-fg);
+    }}
+    .heal-transition-divider {{
         display: flex;
         justify-content: center;
         align-items: center;
-    }
-    .heal-arrow-pill {
-        background: #0f172a;
-        border: 1px solid #334155;
-        color: #38bdf8;
+    }}
+    .heal-arrow-pill {{
+        background: var(--arrow-pill-bg);
+        border: 1px solid var(--border);
+        color: var(--accent);
         font-size: 0.76rem;
         font-weight: 600;
         padding: 0.3rem 0.65rem;
         border-radius: 9999px;
         white-space: nowrap;
-    }
-    .heal-summary-bar {
+    }}
+    .heal-summary-bar {{
         display: flex;
         gap: 0.6rem;
         align-items: center;
         flex-wrap: wrap;
         margin-bottom: 1rem;
-    }
-    .heal-summary-item {
-        background: #1e293b;
-        border: 1px solid #334155;
-        color: #cbd5e1;
+    }}
+    .heal-summary-item {{
+        background: var(--surface-3);
+        border: 1px solid var(--border);
+        color: var(--fg-muted);
         padding: 0.25rem 0.7rem;
         border-radius: 6px;
         font-size: 0.8rem;
         display: flex;
         align-items: center;
         gap: 0.4rem;
-    }
-    .heal-summary-val {
-        color: #38bdf8;
+    }}
+    .heal-summary-val {{
+        color: var(--accent);
         font-weight: 700;
-    }
+    }}
+
+    /* ─── Additional Streamlit overrides for Light mode ─── */
+    /* Tab labels */
+    .stTabs [data-baseweb="tab-list"] button {{
+        color: var(--fg-secondary) !important;
+    }}
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
+        color: var(--accent) !important;
+    }}
+    /* Radio buttons & checkbox labels */
+    .stRadio label span,
+    .stCheckbox label span {{
+        color: var(--fg-primary) !important;
+    }}
+    /* Markdown text */
+    .stMarkdown, .stMarkdown p, .stMarkdown li {{
+        color: var(--fg-primary) !important;
+    }}
+    /* Metric widgets */
+    div[data-testid="stMetricValue"] {{
+        color: var(--fg-primary) !important;
+    }}
+    div[data-testid="stMetricLabel"] {{
+        color: var(--fg-secondary) !important;
+    }}
+    /* Code blocks */
+    .stCodeBlock {{
+        border: 1px solid var(--border) !important;
+    }}
+    /* Caption */
+    .stCaption, div[data-testid="stCaptionContainer"] span {{
+        color: var(--fg-secondary) !important;
+    }}
+    /* Toast / alert banner */
+    div[data-testid="stAlert"] {{
+        border-color: var(--border) !important;
+    }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -541,6 +704,21 @@ int main() {
 # Sidebar Controls
 with st.sidebar:
     st.subheader("⚙️ Control Panel")
+
+    # ─── Light / Dark Theme Toggle ───
+    _theme_col1, _theme_col2 = st.columns([1, 1])
+    with _theme_col1:
+        if st.button("☀️ Light" if _is_dark else "☀️ Light ✓", use_container_width=True,
+                      type="primary" if not _is_dark else "secondary"):
+            st.session_state.theme_mode = "light"
+            st.rerun()
+    with _theme_col2:
+        if st.button("🌙 Dark" if not _is_dark else "🌙 Dark ✓", use_container_width=True,
+                      type="primary" if _is_dark else "secondary"):
+            st.session_state.theme_mode = "dark"
+            st.rerun()
+    st.markdown("---")
+
     selected_language = st.radio("Target Programming Language:", ["Python", "C++"], horizontal=True)
 
     sample_dict = PYTHON_SAMPLE_CODES if selected_language == "Python" else CPP_SAMPLE_CODES
@@ -1317,7 +1495,7 @@ if ctx is not None or opt is not None:
             else:
                 pdg_height = "550px"
                 frame_height = 580
-            html_vis = graph_visualizer.generate_pdg_html(active_graph, tainted_flows=active_taints, height=pdg_height)
+            html_vis = graph_visualizer.generate_pdg_html(active_graph, tainted_flows=active_taints, height=pdg_height, theme=_theme)
             components.html(html_vis, height=frame_height)
         else:
             st.error(f"Failed to generate PDG: {active_graph.get('error')}")

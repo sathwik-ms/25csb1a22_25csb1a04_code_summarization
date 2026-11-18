@@ -26,13 +26,101 @@ def generate_pdg_html(
     pdg_graph: Dict[str, Any],
     tainted_flows: Optional[List[Dict[str, Any]]] = None,
     height: str = "720px",
-    background: str = "#0b0f19"
+    background: str = "#0b0f19",
+    theme: str = "dark"
 ) -> str:
     """
     Generates an orderly, high-contrast, structured HTML visualization for the PDG.
+    Supports 'dark' and 'light' theme modes.
     """
     if tainted_flows is None:
         tainted_flows = []
+
+    _is_light = theme == "light"
+
+    # ── Theme-Aware Palette ──
+    if _is_light:
+        _body_bg = "linear-gradient(135deg, #f8fafc 0%, #eef2f7 50%, #e2e8f0 100%)"
+        _body_fg = "#0f172a"
+        _toolbar_bg = "rgba(241, 245, 249, 0.96)"
+        _toolbar_border = "rgba(37, 99, 235, 0.3)"
+        _toolbar_shadow = "0 6px 24px rgba(0, 0, 0, 0.08)"
+        _pill_bg = "#e2e8f0"
+        _pill_fg = "#2563eb"
+        _pill_border = "#cbd5e1"
+        _pill_hover_bg = "#f1f5f9"
+        _pill_hover_shadow = "0 0 8px rgba(37, 99, 235, 0.2)"
+        _search_bg = "#e2e8f0"
+        _search_fg = "#0f172a"
+        _search_border = "#cbd5e1"
+        _btn_bg = "#e2e8f0"
+        _btn_fg = "#334155"
+        _btn_border = "#cbd5e1"
+        _btn_hover_bg = "#cbd5e1"
+        _btn_hover_fg = "#2563eb"
+        _filter_fg = "#475569"
+        _filter_hover_fg = "#0f172a"
+        _hud_bg = "rgba(241, 245, 249, 0.97)"
+        _hud_border = "rgba(37, 99, 235, 0.35)"
+        _hud_shadow = "0 10px 35px rgba(0, 0, 0, 0.1)"
+        _hud_title_fg = "#2563eb"
+        _hud_scope_bg = "rgba(124, 58, 237, 0.1)"
+        _hud_scope_fg = "#7c3aed"
+        _hud_scope_border = "rgba(124, 58, 237, 0.3)"
+        _hud_code_bg = "#ffffff"
+        _hud_code_border = "#cbd5e1"
+        _hud_code_fg = "#0f172a"
+        _hud_meta_fg = "#475569"
+        _legend_bg = "rgba(241, 245, 249, 0.95)"
+        _legend_border = "rgba(203, 213, 225, 0.8)"
+        _legend_shadow = "0 4px 16px rgba(0, 0, 0, 0.06)"
+        _legend_title_fg = "#475569"
+        _accent = "#2563eb"
+        _edge_stroke_bg = "#f1f5f9"
+        _node_label_fg = "#0f172a"
+        _node_label_stroke = "#ffffff"
+        _node_shadow_color = "rgba(0,0,0,0.12)"
+    else:
+        _body_bg = "radial-gradient(ellipse at 50% 15%, #131c2e 0%, #0c121e 50%, #050811 100%)"
+        _body_fg = "#e2e8f0"
+        _toolbar_bg = "rgba(12, 18, 30, 0.94)"
+        _toolbar_border = "rgba(56, 189, 248, 0.3)"
+        _toolbar_shadow = "0 6px 24px rgba(0, 0, 0, 0.6)"
+        _pill_bg = "#172338"
+        _pill_fg = "#38bdf8"
+        _pill_border = "#334767"
+        _pill_hover_bg = "#0d1624"
+        _pill_hover_shadow = "0 0 8px rgba(56, 189, 248, 0.3)"
+        _search_bg = "#172338"
+        _search_fg = "#f8fafc"
+        _search_border = "#334767"
+        _btn_bg = "#172338"
+        _btn_fg = "#e2e8f0"
+        _btn_border = "#334767"
+        _btn_hover_bg = "#1e3a5f"
+        _btn_hover_fg = "#38bdf8"
+        _filter_fg = "#cbd5e1"
+        _filter_hover_fg = "#ffffff"
+        _hud_bg = "rgba(10, 16, 28, 0.96)"
+        _hud_border = "rgba(56, 189, 248, 0.4)"
+        _hud_shadow = "0 10px 35px rgba(0, 0, 0, 0.75)"
+        _hud_title_fg = "#38bdf8"
+        _hud_scope_bg = "rgba(168, 85, 247, 0.2)"
+        _hud_scope_fg = "#c084fc"
+        _hud_scope_border = "rgba(168, 85, 247, 0.4)"
+        _hud_code_bg = "#050811"
+        _hud_code_border = "#1e293b"
+        _hud_code_fg = "#f8fafc"
+        _hud_meta_fg = "#94a3b8"
+        _legend_bg = "rgba(10, 16, 28, 0.92)"
+        _legend_border = "rgba(51, 65, 85, 0.8)"
+        _legend_shadow = "0 4px 16px rgba(0, 0, 0, 0.5)"
+        _legend_title_fg = "#94a3b8"
+        _accent = "#38bdf8"
+        _edge_stroke_bg = "#0b0f19"
+        _node_label_fg = "#ffffff"
+        _node_label_stroke = "#000000"
+        _node_shadow_color = "rgba(0,0,0,0.65)"
 
     # Map tainted node IDs and edge pairs
     tainted_node_ids = set()
@@ -195,12 +283,12 @@ def generate_pdg_html(
         }
 
         font = {
-            "color": "#ffffff",
+            "color": _node_label_fg,
             "face": "Consolas, 'Cascadia Code', ui-monospace, SFMono-Regular, monospace",
             "size": 12,
             "bold": True,
             "strokeWidth": 3,
-            "strokeColor": "#000000"
+            "strokeColor": _node_label_stroke
         }
 
         truncated = clean_label[:26] + "..." if len(clean_label) > 26 else clean_label
@@ -224,7 +312,7 @@ def generate_pdg_html(
             "borderWidthSelected": 3,
             "font": font,
             "margin": {"top": 8, "bottom": 8, "left": 12, "right": 12},
-            "shadow": {"enabled": True, "color": "rgba(0,0,0,0.65)", "size": 8, "x": 1, "y": 2}
+            "shadow": {"enabled": True, "color": _node_shadow_color, "size": 8, "x": 1, "y": 2}
         })
 
     # 4. Build Structured Edges & Classify Clutter
@@ -276,7 +364,7 @@ def generate_pdg_html(
             "dashes": dashes,
             "arrows": {"to": {"enabled": True, "scaleFactor": 0.85}},
             "smooth": {"type": "cubicBezier", "roundness": 0.2},
-            "font": {"color": "#94a3b8", "size": 10, "face": "Consolas, monospace", "strokeWidth": 2, "strokeColor": "#0b0f19"}
+            "font": {"color": "#94a3b8", "size": 10, "face": "Consolas, monospace", "strokeWidth": 2, "strokeColor": _edge_stroke_bg}
         })
 
     nodes_json = json.dumps(vis_nodes).replace("</script>", "<\\/script>")
@@ -298,9 +386,9 @@ def generate_pdg_html(
     body {{
       margin: 0;
       padding: 0;
-      background: radial-gradient(ellipse at 50% 15%, #131c2e 0%, #0c121e 50%, #050811 100%);
+      background: {_body_bg};
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      color: #e2e8f0;
+      color: {_body_fg};
       overflow: hidden;
       width: 100%;
       height: 100vh;
@@ -310,25 +398,24 @@ def generate_pdg_html(
       height: {height};
       position: relative;
     }}
-    /* Modern Glassmorphic Top Bar */
     .pdg-toolbar {{
       position: absolute;
       top: 10px;
       left: 12px;
       right: 12px;
       z-index: 100;
-      background: rgba(12, 18, 30, 0.94);
+      background: {_toolbar_bg};
       backdrop-filter: blur(14px);
       padding: 7px 14px;
       border-radius: 10px;
-      border: 1px solid rgba(56, 189, 248, 0.3);
+      border: 1px solid {_toolbar_border};
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
       align-items: center;
       justify-content: space-between;
       font-size: 12px;
-      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+      box-shadow: {_toolbar_shadow};
     }}
     .toolbar-left, .toolbar-right {{
       display: flex;
@@ -337,9 +424,9 @@ def generate_pdg_html(
       flex-wrap: wrap;
     }}
     .select-pill {{
-      background: #172338;
-      color: #38bdf8;
-      border: 1px solid #334767;
+      background: {_pill_bg};
+      color: {_pill_fg};
+      border: 1px solid {_pill_border};
       padding: 5px 10px;
       border-radius: 6px;
       font-size: 11px;
@@ -350,14 +437,14 @@ def generate_pdg_html(
       max-width: 260px;
     }}
     .select-pill:hover, .select-pill:focus {{
-      border-color: #38bdf8;
-      background: #0d1624;
-      box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+      border-color: {_accent};
+      background: {_pill_hover_bg};
+      box-shadow: {_pill_hover_shadow};
     }}
     .search-input {{
-      background: #172338;
-      color: #f8fafc;
-      border: 1px solid #334767;
+      background: {_search_bg};
+      color: {_search_fg};
+      border: 1px solid {_search_border};
       padding: 5px 10px;
       border-radius: 6px;
       font-size: 11px;
@@ -366,13 +453,13 @@ def generate_pdg_html(
       transition: all 0.2s ease;
     }}
     .search-input:focus {{
-      border-color: #38bdf8;
+      border-color: {_accent};
       width: 190px;
     }}
     .btn-action {{
-      background: #172338;
-      color: #e2e8f0;
-      border: 1px solid #334767;
+      background: {_btn_bg};
+      color: {_btn_fg};
+      border: 1px solid {_btn_border};
       padding: 5px 11px;
       border-radius: 6px;
       cursor: pointer;
@@ -384,9 +471,9 @@ def generate_pdg_html(
       transition: all 0.2s ease;
     }}
     .btn-action:hover {{
-      background: #1e3a5f;
-      color: #38bdf8;
-      border-color: #38bdf8;
+      background: {_btn_hover_bg};
+      color: {_btn_hover_fg};
+      border-color: {_accent};
     }}
     .filter-label {{
       display: flex;
@@ -394,29 +481,28 @@ def generate_pdg_html(
       gap: 5px;
       cursor: pointer;
       user-select: none;
-      color: #cbd5e1;
+      color: {_filter_fg};
       font-size: 11px;
     }}
-    .filter-label:hover {{ color: #ffffff; }}
-    /* Interactive Glassmorphic HUD */
+    .filter-label:hover {{ color: {_filter_hover_fg}; }}
     #node-hud {{
       position: absolute;
       bottom: 12px;
       left: 12px;
       z-index: 100;
-      background: rgba(10, 16, 28, 0.96);
+      background: {_hud_bg};
       backdrop-filter: blur(16px);
       padding: 12px 16px;
       border-radius: 10px;
-      border: 1px solid rgba(56, 189, 248, 0.4);
+      border: 1px solid {_hud_border};
       max-width: 480px;
       min-width: 300px;
       font-size: 12px;
-      box-shadow: 0 10px 35px rgba(0, 0, 0, 0.75);
+      box-shadow: {_hud_shadow};
     }}
     .hud-title {{
       font-weight: 700;
-      color: #38bdf8;
+      color: {_hud_title_fg};
       font-size: 13px;
       display: flex;
       justify-content: space-between;
@@ -424,21 +510,21 @@ def generate_pdg_html(
       margin-bottom: 6px;
     }}
     .hud-scope {{
-      background: rgba(168, 85, 247, 0.2);
-      color: #c084fc;
-      border: 1px solid rgba(168, 85, 247, 0.4);
+      background: {_hud_scope_bg};
+      color: {_hud_scope_fg};
+      border: 1px solid {_hud_scope_border};
       padding: 2px 7px;
       border-radius: 4px;
       font-size: 10px;
       font-weight: 600;
     }}
     .hud-code {{
-      background: #050811;
-      border: 1px solid #1e293b;
+      background: {_hud_code_bg};
+      border: 1px solid {_hud_code_border};
       padding: 8px 10px;
       border-radius: 6px;
       font-family: Consolas, 'Cascadia Code', ui-monospace, monospace;
-      color: #f8fafc;
+      color: {_hud_code_fg};
       font-size: 11px;
       word-break: break-all;
       max-height: 80px;
@@ -449,28 +535,27 @@ def generate_pdg_html(
       display: flex;
       gap: 14px;
       font-size: 11px;
-      color: #94a3b8;
+      color: {_hud_meta_fg};
     }}
-    /* Clean Legend */
     .legend {{
       position: absolute;
       bottom: 12px;
       right: 12px;
       z-index: 90;
-      background: rgba(10, 16, 28, 0.92);
+      background: {_legend_bg};
       backdrop-filter: blur(12px);
       padding: 9px 13px;
       border-radius: 10px;
-      border: 1px solid rgba(51, 65, 85, 0.8);
+      border: 1px solid {_legend_border};
       font-size: 11px;
       display: flex;
       flex-direction: column;
       gap: 5px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+      box-shadow: {_legend_shadow};
     }}
     .legend-title {{
       font-weight: 700;
-      color: #94a3b8;
+      color: {_legend_title_fg};
       text-transform: uppercase;
       font-size: 10px;
       letter-spacing: 0.5px;
@@ -489,7 +574,7 @@ def generate_pdg_html(
     .line-dash {{
       width: 16px;
       height: 2px;
-      border-top: 2px dashed #38bdf8;
+      border-top: 2px dashed {_accent};
       display: inline-block;
     }}
     .line-solid {{
@@ -512,13 +597,13 @@ def generate_pdg_html(
     <div class="pdg-toolbar">
       <div class="toolbar-left">
         <!-- Scope Filter -->
-        <label style="font-weight:700; color:#38bdf8;">🎯 Scope:</label>
+        <label style="font-weight:700; color:{_accent};">🎯 Scope:</label>
         <select id="scope-selector" class="select-pill">
           <option value="ALL">🌐 All Code ({total_nodes} nodes)</option>
         </select>
         <input type="text" id="node-search" class="search-input" placeholder="🔍 Search logic..." />
-        <span style="color:#64748b; font-size:11px;">|</span>
-        <span style="color:#94a3b8; font-size:11px; font-weight:600;">📐 Layout: Orderly Architectural Grid</span>
+        <span style="color:{_hud_meta_fg}; font-size:11px;">|</span>
+        <span style="color:{_hud_meta_fg}; font-size:11px; font-weight:600;">📐 Layout: Orderly Architectural Grid</span>
       </div>
 
       <div class="toolbar-right">
@@ -538,7 +623,7 @@ def generate_pdg_html(
       </div>
       <div id="hud-code-box" class="hud-code">Point your mouse at nodes to inspect semantic AST logic, control branches, and data flows.</div>
       <div class="hud-meta">
-        <span>⬅️ In-Degree: <strong id="hud-in" style="color:#38bdf8;">0</strong></span>
+        <span>⬅️ In-Degree: <strong id="hud-in" style="color:{_accent};">0</strong></span>
         <span>➡️ Out-Degree: <strong id="hud-out" style="color:#34d399;">0</strong></span>
         <span id="hud-taint-stat" style="display:none; color:#ef4444; font-weight:700;">🚨 TAINTED</span>
       </div>
@@ -615,17 +700,17 @@ def generate_pdg_html(
             if (hovering || selected) {{
               values.borderWidth = 3;
               const isTaint = orig && orig.is_tainted;
-              values.borderColor = isTaint ? "#f87171" : "#38bdf8";
+              values.borderColor = isTaint ? "#f87171" : "{_accent}";
               values.shadow = true;
-              values.shadowColor = isTaint ? "rgba(239, 68, 68, 0.9)" : "rgba(56, 189, 248, 0.85)";
+              values.shadowColor = isTaint ? "rgba(239, 68, 68, 0.9)" : "{'rgba(37, 99, 235, 0.6)' if _is_light else 'rgba(56, 189, 248, 0.85)'}";
               values.shadowSize = 14;
             }}
           }},
           label: function(values, id, selected, hovering) {{
-            // Force label text to stay pure bold white with 3px black stroke!
-            values.color = "#ffffff";
+            // Force label text to stay locked with stroke
+            values.color = "{_node_label_fg}";
             values.strokeWidth = 3;
-            values.strokeColor = "#000000";
+            values.strokeColor = "{_node_label_stroke}";
           }}
         }}
       }},
