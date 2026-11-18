@@ -37,6 +37,11 @@ from agent_security.nesting_guard import check_nesting_depth
 from agent_security.workflow_dfa import WorkflowDFA, DFAState, WorkflowViolation
 from agent_security.optimizer_firewall import inspect_candidate
 from agent_security.input_limits import check_source, safe_parse
+from agent_security.formal_dfa_proof import run_formal_verification
+from agent_security.agent_auth import (
+    SecureAgentContext, AgentKeyManager, AgentID, SecurityTamperException
+)
+from agent_controller import AgentController
 
 PASS = "\033[32mPASS\033[0m"
 FAIL = "\033[31mFAIL\033[0m"
@@ -332,12 +337,14 @@ dfa.step("parse")
 after_parse = (dfa.state == DFAState.AST_VERIFIED)
 dfa.step("graph")
 after_graph = (dfa.state == DFAState.PDG_BUILT)
+dfa.step("green_audit")
+after_green = (dfa.state == DFAState.GREEN_AUDITED)
 dfa.step("audit")
 after_audit = (dfa.state == DFAState.SECURITY_AUDITED)
 dfa.step("optimize")
 after_opt = (dfa.state == DFAState.OPTIMIZED)
 
-legal_sequence_ok = init_ok and after_val and after_parse and after_graph and after_audit and after_opt
+legal_sequence_ok = init_ok and after_val and after_parse and after_graph and after_green and after_audit and after_opt
 
 dfa_bad = WorkflowDFA()
 violation_raised = False
@@ -362,6 +369,97 @@ record_result(
     "DFA.2 Illegal transition raises WorkflowViolation and locks state machine in absorbing TRAP",
     violation_raised and is_trapped_now and trap_absorbing,
     f"Violation={violation_raised}, Absorbing={trap_absorbing}, State={dfa_bad.state.name}"
+)
+
+# =====================================================================
+# Formal Automata Theory: Mathematical Proofs (Theorems 1-4)
+# Target: agent_security/formal_dfa_proof.py
+# Verification: Reachability, Co-reachability, Myhill-Nerode Minimality, Decidability
+# =====================================================================
+print("\n[Automata Proofs] Mathematical Compiler Verification (Theorems 1-4)")
+proofs = run_formal_verification()
+
+record_result(
+    "Proof.1 Theorem 1: All 7 non-trap workflow states reachable from q0",
+    proofs.get("theorem_1_reachable", False),
+    "Unreachable states detected"
+)
+record_result(
+    "Proof.2 Theorem 2: All 7 non-trap states co-reachable to accepting states F",
+    proofs.get("theorem_2_coreachable", False),
+    "Dead-end states detected"
+)
+record_result(
+    "Proof.3 Theorem 3: Myhill-Nerode Table-Filling Minimality proven (21/21 pairs distinguishable)",
+    proofs.get("theorem_3_minimal", False),
+    "Automaton has redundant or equivalent states"
+)
+record_result(
+    "Proof.4 Theorem 4: Regular language L(M) decidable in O(|w|) time and O(1) space",
+    proofs.get("theorem_4_decidable", False),
+    "Language is not regular"
+)
+
+# =====================================================================
+# Multi-Agent Cryptographic Authentication & Tamper-Evident Context
+# Target: agent_security/agent_auth.py & agent_controller.py
+# Defence: HMAC-SHA256 Signatures, Write-Once Context, Anti-Tamper Barrier
+# =====================================================================
+print("\n[Cryptographic Auth] Multi-Agent HMAC-SHA256 Signing & Anti-Tamper Context")
+
+# 1. Valid signing & verification
+km = AgentKeyManager()
+sec_ctx = SecureAgentContext(key_manager=km)
+sig0 = sec_ctx.sign_and_set(AgentID.AGENT_0_HEALER, "clean_code", "def foo(): pass")
+val0, art0 = sec_ctx.get_verified("clean_code")
+auth_valid = (val0 == "def foo(): pass" and art0.agent_id == AgentID.AGENT_0_HEALER.value)
+
+record_result(
+    "Auth.1 Agent-0 signs clean_code with HMAC-SHA256; verified successfully",
+    auth_valid,
+    "Verification failed"
+)
+
+# 2. Cross-agent unauthorized hijack rejection
+cross_hijack_blocked = False
+try:
+    sec_ctx.sign_and_set(AgentID.AGENT_2_GREEN, "clean_code", "def evil(): pass")
+except SecurityTamperException:
+    cross_hijack_blocked = True
+
+record_result(
+    "Auth.2 Unauthorized cross-agent overwrite blocked with SecurityTamperException",
+    cross_hijack_blocked,
+    "Hijack succeeded without raising SecurityTamperException"
+)
+
+# 3. In-memory data tampering detection (SHA-256 digest mismatch)
+sec_ctx._store["clean_code"] = "def modified_in_memory(): pass"
+tamper_detected = False
+try:
+    sec_ctx.get_verified("clean_code")
+except SecurityTamperException:
+    tamper_detected = True
+
+record_result(
+    "Auth.3 In-memory payload modification caught via SHA-256 digest verification",
+    tamper_detected,
+    "Tampering went undetected"
+)
+
+# 4. End-to-end multi-agent pipeline cryptographic integrity
+controller = AgentController()
+test_pipe_ctx = controller.run_workflow("def compute(x): return x * 2")
+e2e_verified = (
+    test_pipe_ctx.integrity_verified is True
+    and test_pipe_ctx.secure_context is not None
+    and len(test_pipe_ctx.secure_context._signatures) >= 8
+)
+
+record_result(
+    f"Auth.4 End-to-end pipeline signed & verified {len(test_pipe_ctx.secure_context._signatures if test_pipe_ctx.secure_context else [])} artifacts across all 5 agents",
+    e2e_verified,
+    f"Verified: {test_pipe_ctx.integrity_verified}"
 )
 
 
@@ -422,6 +520,7 @@ def test_dfa_sequence_and_trap():
     dfa.step("validate")
     dfa.step("parse")
     dfa.step("graph")
+    dfa.step("green_audit")
     dfa.step("audit")
     dfa.step("optimize")
     assert dfa.state == DFAState.OPTIMIZED
@@ -435,6 +534,35 @@ def test_dfa_sequence_and_trap():
     bad_dfa.step("optimize")
     assert bad_dfa.is_trapped is True
     assert bad_dfa.state == DFAState.TRAP
+
+
+def test_formal_automata_theorems():
+    proofs = run_formal_verification()
+    assert proofs.get("theorem_1_reachable") is True
+    assert proofs.get("theorem_2_coreachable") is True
+    assert proofs.get("theorem_3_minimal") is True
+    assert proofs.get("theorem_4_decidable") is True
+
+
+def test_cryptographic_agent_auth():
+    km = AgentKeyManager()
+    sec_ctx = SecureAgentContext(key_manager=km)
+    sec_ctx.sign_and_set(AgentID.AGENT_0_HEALER, "clean_code", "x = 1")
+    val, _ = sec_ctx.get_verified("clean_code")
+    assert val == "x = 1"
+
+    try:
+        sec_ctx.sign_and_set(AgentID.AGENT_1_STRUCTURAL, "clean_code", "x = 2")
+        assert False, "Should have blocked unauthorized overwrite"
+    except SecurityTamperException:
+        pass
+
+    sec_ctx._store["clean_code"] = "x = 3"
+    try:
+        sec_ctx.get_verified("clean_code")
+        assert False, "Should have detected in-memory mutation"
+    except SecurityTamperException:
+        pass
 
 
 if __name__ == "__main__":

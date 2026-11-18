@@ -29,3 +29,6 @@ Thumbs.db
 # Matplotlib cache and logs
 .matplotlib/
 *.log
+
+# Runtime uploads
+uploaded_folders/

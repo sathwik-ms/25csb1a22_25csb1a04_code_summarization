@@ -69,6 +69,20 @@ except ImportError:
     WorkflowViolation = None # type: ignore[assignment,misc]
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Pillar 4B: Cryptographic Multi-Agent Authentication ───────────────────────
+try:
+    from agent_security.agent_auth import (
+        SecureAgentContext, AgentKeyManager, AgentID, SecurityTamperException, SignedArtifact
+    )
+    _AUTH_AVAILABLE = True
+except ImportError:
+    _AUTH_AVAILABLE = False
+    SecureAgentContext = None   # type: ignore[assignment,misc]
+    AgentKeyManager = None      # type: ignore[assignment,misc]
+    AgentID = None              # type: ignore[assignment,misc]
+    SecurityTamperException = Exception
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 class CognitivePhase(str, Enum):
     OBSERVE = "OBSERVE"
@@ -123,6 +137,17 @@ class AgentContext:
     # Flag set when the DFA traps; allows callers to detect the error.
     dfa_trapped: bool = False
     input_rejected: bool = False
+    # ── Pillar 4B: Cryptographic Context & Integrity ───────────────────────────
+    secure_context: Optional[Any] = field(default=None)
+    integrity_verified: bool = False
+
+    def verify_integrity(self) -> bool:
+        """Verifies cryptographic signatures across all signed context artifacts."""
+        if not self.secure_context:
+            return True
+        audit = self.secure_context.audit_all_signatures()
+        self.integrity_verified = all(audit.values()) if audit else True
+        return self.integrity_verified
 
     def add_trace(self, agent_id: str, phase: CognitivePhase, message: str, **metadata):
         event = ThoughtTraceEvent(
@@ -165,6 +190,10 @@ class AgentController:
             ctx.workflow_dfa = dfa
         else:
             dfa = None
+
+        # ── Pillar 4B: Initialise Cryptographic Secure Context ───────────────
+        if _AUTH_AVAILABLE:
+            ctx.secure_context = SecureAgentContext()
 
         def _dfa_step(event: str) -> bool:
             """Fire DFA event; return False (and trap ctx) on WorkflowViolation."""
@@ -244,6 +273,26 @@ class AgentController:
                 f"INPUT REJECTED: {exc} — pipeline halted immediately.",
             )
 
+        # ── Pillar 4B: Cryptographic Verification Barrier ────────────────────
+        if ctx.secure_context:
+            audit = ctx.secure_context.audit_all_signatures()
+            all_valid = all(audit.values()) if audit else True
+            ctx.integrity_verified = all_valid
+            if all_valid:
+                ctx.add_trace(
+                    "[Cryptographic Guard]",
+                    CognitivePhase.ACT,
+                    f"Multi-Agent Cryptographic Integrity Verified: {len(audit)} artifacts signed via HMAC-SHA256.",
+                    signed_fields=list(audit.keys())
+                )
+            else:
+                ctx.add_trace(
+                    "[Cryptographic Guard]",
+                    CognitivePhase.ACT,
+                    f"TAMPER WARNING: Cryptographic signature audit failed across pipeline artifacts: {audit}",
+                    audit=audit
+                )
+
         return ctx
 
     def _run_agent_0_self_healing(self, ctx: AgentContext):
@@ -259,6 +308,10 @@ class AgentController:
 
         ctx.healing_report = report
         ctx.clean_code = report.get('clean_code', ctx.raw_code)
+
+        if ctx.secure_context and _AUTH_AVAILABLE:
+            ctx.secure_context.sign_and_set(AgentID.AGENT_0_HEALER, "clean_code", ctx.clean_code)
+            ctx.secure_context.sign_and_set(AgentID.AGENT_0_HEALER, "healing_report", ctx.healing_report)
 
         if report.get('is_healed'):
             repairs = report.get('repairs', [])
@@ -290,6 +343,11 @@ class AgentController:
         ctx.ast_context = ast_context
         ctx.pdg_context = pdg_context
         ctx.pdg_graph   = pdg_graph
+
+        if ctx.secure_context and _AUTH_AVAILABLE:
+            ctx.secure_context.sign_and_set(AgentID.AGENT_1_STRUCTURAL, "ast_context", ctx.ast_context)
+            ctx.secure_context.sign_and_set(AgentID.AGENT_1_STRUCTURAL, "pdg_context", ctx.pdg_context)
+            ctx.secure_context.sign_and_set(AgentID.AGENT_1_STRUCTURAL, "pdg_graph", ctx.pdg_graph)
 
         node_count = len(pdg_graph.get('nodes', {}))
         edge_count = len(pdg_graph.get('edges', []))
@@ -335,6 +393,9 @@ class AgentController:
         green_profile = analyze_green_computing(ctx.clean_code, analysis_seconds=elapsed, language=ctx.language)
         ctx.green_profile = green_profile
 
+        if ctx.secure_context and _AUTH_AVAILABLE:
+            ctx.secure_context.sign_and_set(AgentID.AGENT_2_GREEN, "green_profile", ctx.green_profile)
+
         score = green_profile.get('score', 100)
         rating = green_profile.get('rating', 'Efficient')
         metrics = green_profile.get('metrics', {})
@@ -368,6 +429,9 @@ class AgentController:
 
         sec_profile["tainted_flows"] = tainted_flows
         ctx.security_profile = sec_profile
+
+        if ctx.secure_context and _AUTH_AVAILABLE:
+            ctx.secure_context.sign_and_set(AgentID.AGENT_3_SECURITY, "security_profile", ctx.security_profile)
 
         findings = sec_profile.get('findings', [])
         sec_score = sec_profile.get('security_score', 100)
@@ -404,6 +468,11 @@ class AgentController:
         # 3. Production Docstring Generator (Google/Sphinx format)
         docstrings = self._generate_docstrings(ctx)
         ctx.docstrings = docstrings
+
+        if ctx.secure_context and _AUTH_AVAILABLE:
+            ctx.secure_context.sign_and_set(AgentID.AGENT_4_COMMUNICATOR, "executive_summary", ctx.executive_summary)
+            ctx.secure_context.sign_and_set(AgentID.AGENT_4_COMMUNICATOR, "developer_walkthrough", ctx.developer_walkthrough)
+            ctx.secure_context.sign_and_set(AgentID.AGENT_4_COMMUNICATOR, "docstrings", ctx.docstrings)
 
         ctx.add_trace(agent_id, CognitivePhase.DECIDE, "Structured multi-tier documentation: Executive, Technical Walkthrough, and Docstring.")
         ctx.add_trace(agent_id, CognitivePhase.ACT, "Produced 3-in-1 Documentation Suite.")

@@ -24,7 +24,8 @@ DFA Specification
   HEALED           – Agent 0 (self-healing) completed
   AST_VERIFIED     – Agent 1 AST pass completed
   PDG_BUILT        – Agent 1 PDG pass completed
-  SECURITY_AUDITED – Agent 3 security audit completed; also green+hw done
+  GREEN_AUDITED    – Agent 2 green-computing audit completed
+  SECURITY_AUDITED – Agent 3 security audit completed; also hw done
   OPTIMIZED        – optional optimizer pass completed
   TRAP (∅)         – absorbing error state; every event stays in TRAP
 
@@ -44,8 +45,8 @@ DFA Specification
   (START,            validate)   → HEALED
   (HEALED,           parse)      → AST_VERIFIED
   (AST_VERIFIED,     graph)      → PDG_BUILT
-  (PDG_BUILT,        green_audit)→ PDG_BUILT          (self-loop)
-  (PDG_BUILT,        audit)      → SECURITY_AUDITED
+  (PDG_BUILT,        green_audit)→ GREEN_AUDITED
+  (GREEN_AUDITED,    audit)      → SECURITY_AUDITED
   (SECURITY_AUDITED, summarize)  → SECURITY_AUDITED   (self-loop)
   (SECURITY_AUDITED, profile)    → SECURITY_AUDITED   (self-loop)
   (SECURITY_AUDITED, optimize)   → OPTIMIZED
@@ -68,6 +69,7 @@ class DFAState(str, Enum):
     HEALED           = "HEALED"
     AST_VERIFIED     = "AST_VERIFIED"
     PDG_BUILT        = "PDG_BUILT"
+    GREEN_AUDITED    = "GREEN_AUDITED"
     SECURITY_AUDITED = "SECURITY_AUDITED"
     OPTIMIZED        = "OPTIMIZED"
     TRAP             = "TRAP"   # absorbing error state (∅)
@@ -100,8 +102,8 @@ _TRANSITIONS: Dict[Tuple[DFAState, str], DFAState] = {
     (DFAState.START,            "validate")   : DFAState.HEALED,
     (DFAState.HEALED,           "parse")      : DFAState.AST_VERIFIED,
     (DFAState.AST_VERIFIED,     "graph")      : DFAState.PDG_BUILT,
-    (DFAState.PDG_BUILT,        "green_audit"): DFAState.PDG_BUILT,          # self-loop
-    (DFAState.PDG_BUILT,        "audit")      : DFAState.SECURITY_AUDITED,
+    (DFAState.PDG_BUILT,        "green_audit"): DFAState.GREEN_AUDITED,
+    (DFAState.GREEN_AUDITED,    "audit")      : DFAState.SECURITY_AUDITED,
     (DFAState.SECURITY_AUDITED, "summarize")  : DFAState.SECURITY_AUDITED,   # self-loop
     (DFAState.SECURITY_AUDITED, "profile")    : DFAState.SECURITY_AUDITED,   # self-loop
     (DFAState.SECURITY_AUDITED, "optimize")   : DFAState.OPTIMIZED,

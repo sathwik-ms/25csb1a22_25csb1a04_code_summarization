@@ -2,7 +2,7 @@ def _get_optimizer_dfa():
     try:
         from agent_security.workflow_dfa import WorkflowDFA
         dfa = WorkflowDFA()
-        for ev in ["validate", "parse", "graph", "audit"]:
+        for ev in ["validate", "parse", "graph", "green_audit", "audit"]:
             dfa.step(ev)
         return dfa
     except Exception:
@@ -575,7 +575,7 @@ if "folder_report" not in st.session_state:
 # Input Source Selector
 input_mode = st.radio(
     "📥 Select Input Source Mode:",
-    ["✍️ Benchmark Presets", "📄 Upload File(s)", "📦 Upload Folder (.ZIP Archive)", "📁 Local Folder Path"],
+    ["✍️ Benchmark Presets", "📄 Upload File(s)", "📁 Project Folder (ZIP / Local)"],
     horizontal=True,
 )
 
@@ -685,142 +685,246 @@ elif input_mode == "📄 Upload File(s)":
         st.info("Upload one or multiple code files to analyze.")
         initial_code = sample_dict.get(selected_sample, "")
 
-elif input_mode == "📦 Upload Folder (.ZIP Archive)":
-    uploaded_zip = st.file_uploader(
-        "Upload a Project Folder as a .ZIP archive:",
-        type=["zip"],
-        help="Compress any folder on your computer into a .zip file and upload it here to import and analyze the entire folder."
-    )
-    if uploaded_zip is not None:
-        import zipfile
-        import io
-        from pathlib import Path
-
-        clean_folder_name = "".join(c for c in Path(uploaded_zip.name).stem if c.isalnum() or c in ("_", "-")) or "uploaded_folder"
-        dest_folder = Path("uploaded_folders") / clean_folder_name
-        dest_folder.mkdir(parents=True, exist_ok=True)
-
-        try:
-            with zipfile.ZipFile(io.BytesIO(uploaded_zip.getvalue())) as z:
-                dest_resolved = dest_folder.resolve()
-                for member in z.namelist():
-                    member_path = (dest_folder / member).resolve()
-                    if not str(member_path).startswith(str(dest_resolved)):
-                        raise Exception("Security check failed: Archive contains unsafe path traversal (Zip-Slip)")
-                z.extractall(dest_folder)
-
-            py_exts = {".py"}
-            cpp_exts = {".cpp", ".cc", ".cxx", ".h", ".hpp", ".c"}
-            target_exts = cpp_exts if selected_language == "C++" else py_exts
-            all_code_exts = py_exts | cpp_exts
-
-            all_code_files = [
-                p for p in dest_folder.rglob("*")
-                if p.is_file() and p.suffix.lower() in all_code_exts
-                and not any(x.startswith(".") or x in ("venv", "__pycache__", "build", "dist", "node_modules") for x in p.parts)
-            ]
-
-            matching_files = [p for p in all_code_files if p.suffix.lower() in target_exts]
-
-            if all_code_files:
-                st.success(
-                    f"✅ Successfully uploaded and unpacked folder **`{clean_folder_name}`**! "
-                    f"Found **{len(all_code_files)}** code file(s) ({len(matching_files)} matching {selected_language})."
-                )
-
-                col_z1, col_z2 = st.columns([2.5, 1.5])
-                file_map = {str(p.relative_to(dest_folder)): p for p in sorted(all_code_files)}
-                with col_z1:
-                    chosen_zip_file = st.selectbox("Select File from Uploaded Folder to View & Edit:", list(file_map.keys()))
-                with col_z2:
-                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                    run_zip_batch = st.button("📁 Run Batch Audit on Uploaded Folder", use_container_width=True)
-
-                selected_path = file_map[chosen_zip_file]
-                try:
-                    with open(selected_path, "r", encoding="utf-8", errors="replace") as f:
-                        initial_code = f.read()
-                except Exception as e:
-                    st.error(f"Failed to read file {selected_path}: {e}")
-
-                if run_zip_batch:
-                    with st.spinner(f"Running Multi-Agent Audit on all files in `{clean_folder_name}`..."):
-                        from agent_controller import AgentController
-                        controller = AgentController()
-                        lang_code = "cpp" if selected_language == "C++" else "python"
-                        rep = controller.analyze_folder(str(dest_folder), language=lang_code, recursive=True)
-                        rep["folder_path"] = f"Uploaded Folder: {clean_folder_name}"
-                        st.session_state.folder_report = rep
-                        st.success(f"Batch audit of {rep['total_files']} files completed successfully!")
-            else:
-                st.warning(f"No source code files (.py, .cpp, .h) found inside `{uploaded_zip.name}`.")
-                initial_code = sample_dict.get(selected_sample, "")
-
-        except Exception as err:
-            st.error(f"Error extracting zip archive: {err}")
-            initial_code = sample_dict.get(selected_sample, "")
-    else:
-        st.info("📦 **Tip:** To upload a whole folder, zip it (`.zip`) on your computer and upload it here.")
-        initial_code = sample_dict.get(selected_sample, "")
-
-elif input_mode == "📁 Local Folder Path":
+elif input_mode == "📁 Project Folder (ZIP / Local)":
     from pathlib import Path
-    col_f1, col_f2 = st.columns([3, 1])
-    with col_f1:
-        folder_path_input = st.text_input(
-            "Enter Folder Path (Relative or Absolute):",
-            value="input_codes",
-            help="Directory to scan for code files. E.g. 'input_codes' or 'input_codes/graph_15_inputs'"
-        )
-    with col_f2:
-        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-        recursive_scan = st.checkbox("Recursive Search", value=True)
+    import zipfile
+    import io
 
-    folder_obj = Path(folder_path_input)
-    if folder_obj.exists() and folder_obj.is_dir():
+    # 1. Dual Ingestion Mode Selector (Best of Both Worlds)
+    c_src1, c_src2 = st.columns([1.6, 2.4])
+    with c_src1:
+        folder_source_type = st.radio(
+            "Folder Input Method:",
+            ["📦 Upload .ZIP Archive", "📂 Local Directory Path"],
+            horizontal=True,
+            help="Upload a zipped project from your PC or scan an existing directory on disk."
+        )
+
+    active_folder = None
+    folder_display_name = ""
+    recursive_scan = True
+
+    with c_src2:
+        if folder_source_type == "📦 Upload .ZIP Archive":
+            uploaded_zip = st.file_uploader(
+                "Upload a Project Folder as a .ZIP archive:",
+                type=["zip"],
+                help="Compress any project folder on your PC into a .zip file and drop it here."
+            )
+            if uploaded_zip is not None:
+                clean_folder_name = "".join(c for c in Path(uploaded_zip.name).stem if c.isalnum() or c in ("_", "-")) or "uploaded_folder"
+                dest_folder = Path("uploaded_folders") / clean_folder_name
+                dest_folder.mkdir(parents=True, exist_ok=True)
+                try:
+                    with zipfile.ZipFile(io.BytesIO(uploaded_zip.getvalue())) as z:
+                        dest_resolved = dest_folder.resolve()
+                        for member in z.namelist():
+                            member_path = (dest_folder / member).resolve()
+                            if not str(member_path).startswith(str(dest_resolved)):
+                                raise Exception("Security check failed: Archive contains unsafe path traversal (Zip-Slip)")
+                        z.extractall(dest_folder)
+                    active_folder = dest_folder
+                    folder_display_name = f"Uploaded ZIP: {clean_folder_name}"
+                except Exception as err:
+                    st.error(f"Error extracting zip archive: {err}")
+            else:
+                up_dir = Path("uploaded_folders")
+                if up_dir.exists():
+                    existing_folders = [p for p in up_dir.iterdir() if p.is_dir()]
+                    if existing_folders:
+                        prev_sel = st.selectbox(
+                            "Or select a previously unpacked project:",
+                            ["None"] + [p.name for p in existing_folders]
+                        )
+                        if prev_sel != "None":
+                            active_folder = up_dir / prev_sel
+                            folder_display_name = f"Unpacked Project: {prev_sel}"
+        else:
+            col_lp1, col_lp2 = st.columns([3, 1])
+            with col_lp1:
+                folder_path_input = st.text_input(
+                    "Enter Local Folder Path (Relative or Absolute):",
+                    value="input_codes",
+                    help="Directory to scan for code files. E.g. 'input_codes' or 'input_codes/graph_15_inputs'"
+                )
+            with col_lp2:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                recursive_scan = st.checkbox("Recursive", value=True, help="Scan all subfolders recursively")
+
+            p_cand = Path(folder_path_input)
+            if p_cand.exists() and p_cand.is_dir():
+                active_folder = p_cand
+                folder_display_name = f"Local Folder: {folder_path_input}"
+            else:
+                st.error(f"Directory not found: `{folder_path_input}`")
+
+    # If an active folder is resolved and available
+    if active_folder and active_folder.exists() and active_folder.is_dir():
         py_exts = {".py"}
         cpp_exts = {".cpp", ".cc", ".cxx", ".h", ".hpp", ".c"}
         target_exts = cpp_exts if selected_language == "C++" else py_exts
-        
-        walk = folder_obj.rglob("*") if recursive_scan else folder_obj.glob("*")
-        discovered = [
-            p for p in walk if p.is_file() and p.suffix.lower() in target_exts
+        all_code_exts = py_exts | cpp_exts
+
+        walk_iter = active_folder.rglob("*") if recursive_scan else active_folder.glob("*")
+        discovered_all = [
+            p for p in walk_iter
+            if p.is_file() and p.suffix.lower() in all_code_exts
             and not any(x.startswith(".") or x in ("venv", "__pycache__", "build", "dist", "node_modules") for x in p.parts)
         ]
-        
-        if discovered:
-            st.success(f"Discovered **{len(discovered)}** {selected_language} file(s) in `{folder_path_input}`")
-            col_sel, col_btn = st.columns([2.5, 1.5])
-            file_map = {str(p.relative_to(folder_obj)): p for p in sorted(discovered)}
-            with col_sel:
-                chosen_folder_file = st.selectbox("Select File from Folder to Inspect:", list(file_map.keys()))
-            with col_btn:
-                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                run_folder_batch = st.button("📁 Run Batch Audit on Entire Folder", use_container_width=True)
+        discovered_matching = [p for p in discovered_all if p.suffix.lower() in target_exts]
 
-            selected_path = file_map[chosen_folder_file]
-            try:
-                with open(selected_path, "r", encoding="utf-8", errors="replace") as f:
-                    initial_code = f.read()
-            except Exception as e:
-                st.error(f"Failed to read file {selected_path}: {e}")
-
-            if run_folder_batch:
-                with st.spinner(f"Scanning and auditing all {len(discovered)} files in `{folder_path_input}`..."):
-                    try:
-                        from agent_controller import AgentController
-                        controller = AgentController()
-                        lang_code = "cpp" if selected_language == "C++" else "python"
-                        rep = controller.analyze_folder(folder_path_input, language=lang_code, recursive=recursive_scan)
-                        st.session_state.folder_report = rep
-                        st.success(f"Batch audit of {rep['total_files']} files completed successfully!")
-                    except Exception as err:
-                        st.error(f"Error analyzing folder: {err}")
-        else:
-            st.warning(f"No {selected_language} files found in `{folder_path_input}`.")
+        if not discovered_matching:
+            st.warning(f"No {selected_language} source files found in `{folder_display_name}`.")
             initial_code = sample_dict.get(selected_sample, "")
+        else:
+            # 2. Folder-Wise Breakdown & Subfolder Grouping
+            subfolder_map = {}
+            for p in discovered_matching:
+                rel_parent = str(p.relative_to(active_folder).parent).replace("\\", "/")
+                if rel_parent in (".", ""):
+                    sub_key = "📁 root (top-level)"
+                else:
+                    sub_key = f"📁 {rel_parent}/"
+                subfolder_map.setdefault(sub_key, []).append(p)
+
+            total_files = len(discovered_matching)
+            total_subfolders = len(subfolder_map)
+
+            st.success(
+                f"✅ **{folder_display_name}** loaded! Found **{total_files}** {selected_language} file(s) across **{total_subfolders}** subfolder/module(s)."
+            )
+
+            # 3. Work Partitioning: Folder-Wise & Batch-Wise Controls
+            st.markdown("##### 🗂️ Work Partitioning: Folder-Wise & Batch-Wise Controls")
+            c_fwise, c_bwise = st.columns([2, 2])
+
+            with c_fwise:
+                subfolder_options = ["🌐 All Subfolders (Entire Project)"] + sorted(list(subfolder_map.keys()))
+                selected_subfolder = st.selectbox(
+                    "📁 Filter Scope (Folder-Wise):",
+                    subfolder_options,
+                    help="Select a specific subfolder module to isolate or inspect the entire project."
+                )
+
+            # Target files based on selected folder-wise filter
+            if selected_subfolder == "🌐 All Subfolders (Entire Project)":
+                active_scope_files = sorted(discovered_matching)
+                scope_label = "Entire Project"
+            else:
+                active_scope_files = sorted(subfolder_map[selected_subfolder])
+                scope_label = selected_subfolder
+
+            with c_bwise:
+                c_bsize, c_bact = st.columns([1, 1.3])
+                with c_bsize:
+                    batch_chunk_size = st.selectbox(
+                        "Batch Chunk Size:",
+                        [5, 10, 25, "All"],
+                        index=1,
+                        help="Chunk size for batch processing"
+                    )
+                with c_bact:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    run_batch_btn = st.button(
+                        f"📊 Run Batch Audit ({len(active_scope_files)} files)",
+                        use_container_width=True,
+                        type="secondary"
+                    )
+
+            # 4. Single-File Inspection Bridge
+            c_sel_f, c_info = st.columns([3, 1])
+            with c_sel_f:
+                file_map_scope = {str(p.relative_to(active_folder)).replace("\\", "/"): p for p in active_scope_files}
+                chosen_rel_path = st.selectbox(
+                    f"Select Specific File to View, Edit & Audit ({len(file_map_scope)} files in scope):",
+                    list(file_map_scope.keys())
+                )
+            with c_info:
+                st.caption(f"Language: **{selected_language}**")
+                st.caption(f"Active Scope: `{scope_label}`")
+
+            # Load selected single file into initial_code
+            if chosen_rel_path and chosen_rel_path in file_map_scope:
+                chosen_p = file_map_scope[chosen_rel_path]
+                try:
+                    with open(chosen_p, "r", encoding="utf-8", errors="replace") as f:
+                        initial_code = f.read()
+                except Exception as e:
+                    st.error(f"Failed to read file {chosen_p}: {e}")
+
+            # 5. Execute Batch Audit (Batch-Wise with Live Progress Bar)
+            if run_batch_btn:
+                prog_bar = st.progress(0.0)
+                status_txt = st.empty()
+                batch_files_res = []
+                total_vulns = 0
+                sec_scores = []
+                eco_scores = []
+
+                from agent_controller import AgentController
+                controller = AgentController()
+                lang_code = "cpp" if selected_language == "C++" else "python"
+
+                total_n = len(active_scope_files)
+                for idx, f_path in enumerate(active_scope_files):
+                    status_txt.markdown(f"Auditing file **{idx + 1}/{total_n}**: `{f_path.name}`...")
+                    prog_bar.progress((idx + 1) / total_n)
+                    try:
+                        with open(f_path, "r", encoding="utf-8", errors="replace") as f_in:
+                            content = f_in.read()
+                        ctx = controller.run_workflow(content, language=lang_code)
+                        findings = ctx.security_profile.get("findings", [])
+                        sec_score = ctx.security_profile.get("security_score", 100)
+                        eco_score = ctx.green_profile.get("score", 100)
+
+                        total_vulns += len(findings)
+                        sec_scores.append(sec_score)
+                        eco_scores.append(eco_score)
+
+                        batch_files_res.append({
+                            "file_name": f_path.name,
+                            "rel_path": str(f_path.relative_to(active_folder)).replace("\\", "/"),
+                            "abs_path": str(f_path.resolve()),
+                            "subfolder": str(f_path.relative_to(active_folder).parent).replace("\\", "/"),
+                            "language": lang_code,
+                            "lines": len(content.splitlines()),
+                            "security_score": sec_score,
+                            "security_rating": ctx.security_profile.get("rating", "Secure"),
+                            "vulnerabilities": len(findings),
+                            "cwe_list": [f.get("cwe") for f in findings],
+                            "eco_score": eco_score,
+                            "eco_rating": ctx.green_profile.get("rating", "Efficient"),
+                            "healed": ctx.healing_report.get("is_healed", False),
+                            "context": ctx,
+                        })
+                    except Exception as err:
+                        batch_files_res.append({
+                            "file_name": f_path.name,
+                            "rel_path": str(f_path.relative_to(active_folder)).replace("\\", "/"),
+                            "abs_path": str(f_path.resolve()),
+                            "subfolder": str(f_path.relative_to(active_folder).parent).replace("\\", "/"),
+                            "language": lang_code,
+                            "error": str(err),
+                        })
+
+                status_txt.empty()
+                prog_bar.empty()
+
+                avg_sec = round(sum(sec_scores) / len(sec_scores), 1) if sec_scores else 100.0
+                avg_eco = round(sum(eco_scores) / len(eco_scores), 1) if eco_scores else 100.0
+
+                st.session_state.folder_report = {
+                    "folder_path": f"{folder_display_name} [{scope_label}]",
+                    "total_files": len(batch_files_res),
+                    "total_vulnerabilities": total_vulns,
+                    "avg_security_score": avg_sec,
+                    "avg_eco_score": avg_eco,
+                    "files": batch_files_res,
+                }
+                st.success(f"Batch audit of {len(batch_files_res)} files completed successfully!")
+                st.rerun()
     else:
-        st.error(f"Directory not found: `{folder_path_input}`")
+        st.info("📂 **Tip:** Select an upload method above to load a zipped archive or local directory.")
         initial_code = sample_dict.get(selected_sample, "")
 
 
@@ -854,7 +958,7 @@ if run_agentic:
                 import importlib
                 import sys
                 for mod_name in list(sys.modules.keys()):
-                    if mod_name.startswith("polyglot") or mod_name in ("agent_controller", "green_computing", "optimizer_agent"):
+                    if mod_name.startswith("polyglot") or mod_name.startswith("agent_security") or mod_name in ("agent_controller", "green_computing", "optimizer_agent", "ast_security_transformer", "security_scanner"):
                         try:
                             importlib.reload(sys.modules[mod_name])
                         except Exception:
@@ -882,7 +986,7 @@ if run_optimizer:
                 import importlib
                 import sys
                 for mod_name in list(sys.modules.keys()):
-                    if mod_name.startswith("polyglot") or mod_name in ("agent_controller", "green_computing", "optimizer_agent"):
+                    if mod_name.startswith("polyglot") or mod_name.startswith("agent_security") or mod_name in ("agent_controller", "green_computing", "optimizer_agent", "ast_security_transformer", "security_scanner"):
                         try:
                             importlib.reload(sys.modules[mod_name])
                         except Exception:
@@ -918,23 +1022,61 @@ if st.session_state.folder_report is not None:
 
         st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
 
-        table_rows = []
-        for f in rep["files"]:
-            table_rows.append({
-                "File": f.get("rel_path") or f.get("file_name"),
-                "Language": f.get("language", "unknown").upper(),
-                "Lines": f.get("lines", 0),
-                "Security Score": f"{f.get('security_score', '-')}/100" if f.get('security_score') is not None else "-",
-                "Risk Rating": f.get("security_rating", "-"),
-                "CWE Findings": f.get("vulnerabilities", 0),
-                "Eco Score": f"{f.get('eco_score', '-')}/100" if f.get('eco_score') is not None else "-",
-                "Rating": f.get("eco_rating", "-"),
-                "Self-Healed": "Yes" if f.get("healed") else "No",
-            })
-        if table_rows:
-            import pandas as pd
-            df = pd.DataFrame(table_rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        rep_tabs = st.tabs(["📂 Folder-Wise Breakdown", "📄 All Files Detailed Audit"])
+
+        with rep_tabs[0]:
+            folder_stats = {}
+            for f in rep["files"]:
+                sub = f.get("subfolder") or str(Path(f.get("rel_path", "")).parent).replace("\\", "/")
+                if sub in (".", ""):
+                    sub = "root (top-level)"
+                if sub not in folder_stats:
+                    folder_stats[sub] = {"files": 0, "lines": 0, "vulns": 0, "sec_scores": [], "eco_scores": []}
+                folder_stats[sub]["files"] += 1
+                folder_stats[sub]["lines"] += f.get("lines", 0)
+                folder_stats[sub]["vulns"] += f.get("vulnerabilities", 0)
+                if f.get("security_score") is not None:
+                    folder_stats[sub]["sec_scores"].append(f.get("security_score"))
+                if f.get("eco_score") is not None:
+                    folder_stats[sub]["eco_scores"].append(f.get("eco_score"))
+
+            fwise_rows = []
+            for sname, sdata in sorted(folder_stats.items()):
+                avg_s = round(sum(sdata["sec_scores"]) / len(sdata["sec_scores"]), 1) if sdata["sec_scores"] else 100.0
+                avg_e = round(sum(sdata["eco_scores"]) / len(sdata["eco_scores"]), 1) if sdata["eco_scores"] else 100.0
+                fwise_rows.append({
+                    "Subfolder / Module": sname,
+                    "Files Count": sdata["files"],
+                    "Total Lines": sdata["lines"],
+                    "Avg Security Score": f"{avg_s}/100",
+                    "Total CWEs Found": sdata["vulns"],
+                    "Avg Eco Score": f"{avg_e}/100",
+                    "Risk Status": "🟢 Clean / Secure" if avg_s >= 80 else ("🟡 Moderate Risk" if avg_s >= 50 else "🔴 Critical Risk"),
+                })
+            if fwise_rows:
+                import pandas as pd
+                df_fwise = pd.DataFrame(fwise_rows)
+                st.dataframe(df_fwise, use_container_width=True, hide_index=True)
+
+        with rep_tabs[1]:
+            table_rows = []
+            for f in rep["files"]:
+                table_rows.append({
+                    "File": f.get("rel_path") or f.get("file_name"),
+                    "Subfolder": f.get("subfolder") or "root",
+                    "Language": f.get("language", "unknown").upper(),
+                    "Lines": f.get("lines", 0),
+                    "Security Score": f"{f.get('security_score', '-')}/100" if f.get('security_score') is not None else "-",
+                    "Risk Rating": f.get("security_rating", "-"),
+                    "CWE Findings": f.get("vulnerabilities", 0),
+                    "Eco Score": f"{f.get('eco_score', '-')}/100" if f.get('eco_score') is not None else "-",
+                    "Rating": f.get("eco_rating", "-"),
+                    "Self-Healed": "Yes" if f.get("healed") else "No",
+                })
+            if table_rows:
+                import pandas as pd
+                df = pd.DataFrame(table_rows)
+                st.dataframe(df, use_container_width=True, hide_index=True)
 
         file_options = [f.get("rel_path") or f.get("file_name") for f in rep["files"] if "context" in f]
         if file_options:
@@ -1162,8 +1304,21 @@ if ctx is not None or opt is not None:
             active_graph = extract_pdg_graph(code_input)
 
         if active_graph.get("status") == "ok":
-            html_vis = generate_pdg_html(active_graph, tainted_flows=active_taints, height="560px")
-            components.html(html_vis, height=580)
+            import importlib
+            import graph_visualizer
+            importlib.reload(graph_visualizer)
+            num_nodes = len(active_graph.get("nodes", {}))
+            if num_nodes >= 60:
+                pdg_height = "760px"
+                frame_height = 790
+            elif num_nodes >= 25:
+                pdg_height = "640px"
+                frame_height = 670
+            else:
+                pdg_height = "550px"
+                frame_height = 580
+            html_vis = graph_visualizer.generate_pdg_html(active_graph, tainted_flows=active_taints, height=pdg_height)
+            components.html(html_vis, height=frame_height)
         else:
             st.error(f"Failed to generate PDG: {active_graph.get('error')}")
 
@@ -1182,6 +1337,25 @@ if ctx is not None or opt is not None:
             exec_mode_badge = hw.get('execution_mode', 'standard')
             backend_badge = hw.get('profiler_backend', 'sandbox')
             st.caption(f"**Execution Engine:** `{backend_badge}` &bull; **Mode:** `{exec_mode_badge}`")
+
+            if hw.get('blocked'):
+                st.warning(
+                    f"🛡️ **Live Execution Prevented by Security Gatekeeper** ({backend_badge})\n\n"
+                    f"**Gatekeeper Interception:** {hw.get('summary', 'Critical vulnerability / Shell injection detected in code')}\n\n"
+                    "🔒 **Why are metrics 0.00?** To protect your machine from hostile shell tampering or command injection (e.g. CWE-78), "
+                    "the AST Gatekeeper intercepts untrusted code before execution. "
+                    "Hardware metrics (CPU, RAM, Energy) are intentionally held at **0.00** because execution was prevented before reaching the CPU.\n\n"
+                    "⚡ **Remediation:** Run the **⚡ Green & Secure Optimizer** (Tab 6) to sanitize vulnerabilities into secure alternatives, then re-profile for live hardware benchmarks."
+                )
+            elif hw.get('timed_out'):
+                st.warning(
+                    f"⏱️ **Execution Halted by Watchdog:** {hw.get('summary', 'Execution exceeded runtime threshold')}"
+                )
+            elif hw.get('memory_exceeded'):
+                st.warning(
+                    f"💥 **Execution Halted by Memory Guard:** {hw.get('summary', 'Peak RAM exceeded memory ceiling')}"
+                )
+
             h1, h2, h3, h4 = st.columns(4)
             h1.metric("Execution Latency", f"{hw.get('latency_ms', 0):.2f} ms")
             h2.metric("CPU Execution Time", f"{hw.get('cpu_time_ms', 0):.2f} ms", f"{hw.get('cpu_percent', 0)}% CPU")

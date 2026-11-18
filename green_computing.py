@@ -323,7 +323,7 @@ def analyze_cpp_green_computing(
         "status": "ok",
         "score": score,
         "rating": rating,
-        "summary": f"{rating} green score: {score}/100 with {issue_text}.",
+        "summary": f"[HEURISTIC ESTIMATE] {rating} green score: {score}/100 with {issue_text}.",
         "metrics": metrics,
         "estimated_energy_kwh": round(energy_kwh, 8),
         "estimated_co2_kg": round(co2_kg, 8),
@@ -341,6 +341,15 @@ def analyze_green_computing(
     device_watts: float = DEFAULT_DEVICE_WATTS,
     language: str | None = None,
 ) -> dict:
+    """
+    Returns a static GREEN COMPUTING PROFILE based on syntactic and algorithmic heuristics.
+
+    ⚠️  Disclaimer: Estimated energy (kWh) and carbon footprint (kg CO2e) are STATIC
+    HEURISTIC MODELS derived from algorithmic complexity, loop nesting depth, and execution
+    time estimations. They do NOT represent physical power draw measured directly via
+    hardware sensors (RAPL/PAPI). For dynamic runtime hardware measurements, refer to
+    hardware_profiler.py.
+    """
     # ── Polyglot C++ Routing Check ───────────────────────────────────────────
     if _POLYGLOT_AVAILABLE:
         is_cpp = False
@@ -471,7 +480,7 @@ def analyze_green_computing(
         "status": "ok",
         "score": score,
         "rating": rating,
-        "summary": f"{rating} green score: {score}/100 with {issue_text}.",
+        "summary": f"[HEURISTIC ESTIMATE] {rating} green score: {score}/100 with {issue_text}.",
         "metrics": metrics,
         "estimated_energy_kwh": round(energy_kwh, 8),
         "estimated_co2_kg": round(co2_kg, 8),

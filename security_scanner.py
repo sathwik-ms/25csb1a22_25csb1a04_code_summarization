@@ -65,19 +65,19 @@ PYTHON_SECURITY_PATTERNS = [
     (r'\.execute\s*\(\s*f["\']',
      '[CWE-89] SQL Injection: Dynamic f-string inside execute(). Use parameterized queries instead.',
      'HIGH', 'sec.py.sqli-fstring'),
-    (r'\.execute\s*\([^)]*["\'].*\s*%\s*',
+    (r'\.execute\s*\([^,)]*["\'][^,)]*%\s*',
      '[CWE-89] SQL Injection: %-formatting in SQL execute(). Use parameterized queries.',
      'HIGH', 'sec.py.sqli-format'),
-    (r'\.execute\s*\(\s*\w[^"\'()\n]*\+',
+    (r'\.execute\s*\(\s*[^,)]*\+',
      '[CWE-89] SQL Injection: String concatenation in execute(). Use parameterized queries.',
      'HIGH', 'sec.py.sqli-concat'),
-    (r'\.executemany\s*\(\s*\w[^"\'()\n]*\+',
+    (r'\.executemany\s*\(\s*[^,)]*\+',
      '[CWE-89] SQL Injection: String concatenation in executemany().',
      'HIGH', 'sec.py.sqli-executemany'),
     (r'\.raw\s*\(\s*\w[^"\'()\n]*\+',
      '[CWE-89] SQL Injection: Raw ORM query with string concatenation.',
      'HIGH', 'sec.py.sqli-orm-raw'),
-    (r'cursor\.(execute|executemany)\s*\(\s*["\'].*\{[a-zA-Z_]',
+    (r'cursor\.(execute|executemany)\s*\(\s*["\'][^,)]*\{[a-zA-Z_]',
      '[CWE-89] SQL Injection: str.format() used to construct SQL query. Use query placeholders.',
      'HIGH', 'sec.py.sqli-strformat'),
 
@@ -173,7 +173,7 @@ PYTHON_SECURITY_PATTERNS = [
      'HIGH', 'sec.py.requests-ssl-false'),
 
     # ── Path Traversal & Zip Slip (CWE-22, CWE-29) ──
-    (r'open\s*\([^,)]*\+[^,)]*\)',
+    (r'open\s*\([^)]*\+[^)]*\)',
      '[CWE-22] Potential Path Traversal: Concatenating variables into open() path without validation. Use os.path.abspath validation or pathlib.Path.resolve().',
      'MEDIUM', 'sec.py.path-open-concat'),
     (r'\.extractall\s*\([^)]*\)',
@@ -256,8 +256,33 @@ class SecurityAuditor:
         findings = []
         seen = set()
 
+        # Collect docstring line ranges to avoid false positives on comments and documentation
+        docstring_lines = set()
+        try:
+            tree = ast.parse(source_code)
+            for n in ast.walk(tree):
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module)):
+                    if n.body and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant):
+                        expr = n.body[0]
+                        for l in range(expr.lineno, getattr(expr, 'end_lineno', expr.lineno) + 1):
+                            docstring_lines.add(l)
+        except Exception:
+            pass
+
         for pattern, message, severity, rule_id in self.patterns:
+            is_secret_rule = any(k in rule_id.lower() for k in ("secret", "key", "password", "token", "cwe-798", "cwe-321"))
             for idx, line in enumerate(lines):
+                line_no = idx + 1
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                # Skip comments unless auditing for leaked credentials
+                if stripped.startswith("#") and not is_secret_rule:
+                    continue
+                # Skip docstrings unless auditing for leaked credentials
+                if line_no in docstring_lines and not is_secret_rule:
+                    continue
+
                 match, timed_out = safe_search(pattern, line)
                 if timed_out:
                     key = ('sec.py.redos-degraded', idx + 1)
@@ -290,9 +315,8 @@ class SecurityAuditor:
                             'snippet': line.strip()[:100]
                         })
 
-        # Calculate scores
-        risk_score = self._compute_risk_score(findings)
-        security_score = max(0, int(100 - (risk_score * 10)))
+        # Calculate scores via proportional diminishing-penalty model
+        risk_score, security_score = self._compute_proportional_scores(findings)
         rating = self._classify_rating(security_score, findings)
         remediations = self._generate_remediations(findings)
 
@@ -309,43 +333,133 @@ class SecurityAuditor:
 
     def analyze_pdg_taint(self, source_code: str, pdg_graph: dict) -> List[Dict]:
         """
-        Correlates PDG data dependency edges with security findings.
-        Flags when user input (source) flows into a security-sensitive operation (sink).
+        Intra-procedural taint flow analysis using PDG data-flow edges and line numbers.
+        Tracks variables from user-controlled / external inputs (sources) to
+        high/critical security vulnerabilities (sinks).
         """
         tainted_flows = []
-        audit_result = self.audit_code(source_code)
-        findings = audit_result.get('findings', [])
-
-        if not findings or not pdg_graph or not pdg_graph.get('edges'):
+        if not source_code or not pdg_graph or not pdg_graph.get('edges'):
             return tainted_flows
 
-        edges = pdg_graph.get('edges', [])
         nodes = pdg_graph.get('nodes', {})
+        node_linenos = pdg_graph.get('node_linenos', {})
+        edges = pdg_graph.get('edges', [])
 
-        # Dangerous sinks from findings
-        sensitive_lines = {f['line']: f for f in findings}
+        # 1. Identify taint sources (lines with user/untrusted input)
+        source_patterns = [
+            r'\binput\s*\(',
+            r'\bsys\.argv\b',
+            r'\brequest\.(args|form|json|data|values|GET|POST)\b',
+            r'\bos\.environ\b',
+            r'\bopen\s*\(',
+        ]
+        source_lines = set()
+        for idx, line in enumerate(source_code.splitlines(), start=1):
+            for pat in source_patterns:
+                if re.search(pat, line):
+                    source_lines.add(idx)
+                    break
 
-        # Check data dependency edges
+        # 2. Identify dangerous sinks from scanner findings
+        audit_result = self.audit_code(source_code)
+        findings = audit_result.get('findings', [])
+        sink_findings_by_line = {}
+        for f in findings:
+            if f.get('severity') in ('CRITICAL', 'HIGH'):
+                sink_findings_by_line[f.get('line')] = f
+
+        if not sink_findings_by_line:
+            return tainted_flows
+
+        # 3. Build data-flow adjacency list: src_node -> list of (tgt_node, var_name)
+        data_adj = {}
         for edge in edges:
             if edge.get('kind') == 'Data':
-                source_node = edge.get('source', '')
-                target_node = edge.get('target', '')
+                src = edge.get('source')
+                tgt = edge.get('target')
                 var_name = edge.get('label', '')
+                if src and tgt:
+                    data_adj.setdefault(src, []).append((tgt, var_name))
 
-                source_label = nodes.get(source_node, '')
-                target_label = nodes.get(target_node, '')
+        # Map line numbers to candidate starting nodes
+        line_to_nodes = {}
+        for node_id, ln in node_linenos.items():
+            if ln > 0:
+                line_to_nodes.setdefault(ln, []).append(node_id)
 
-                # If target performs a dangerous operation
-                is_dangerous_sink = any(k in target_label.lower() for k in ['execute', 'system', 'eval', 'popen', 'loads', 'pickle'])
-                if is_dangerous_sink:
-                    tainted_flows.append({
-                        'source': source_label,
-                        'target': target_label,
-                        'variable': var_name,
-                        'description': f"Variable '{var_name}' flows from [{source_label}] into sensitive operation [{target_label}]"
-                    })
+        # 4. Traverse data flow paths from sources to sinks (BFS)
+        from collections import deque
+        seen_flows = set()
+
+        # If explicit source lines found, trace from them; otherwise also inspect function parameters
+        start_nodes = set()
+        for s_line in source_lines:
+            for nid in line_to_nodes.get(s_line, []):
+                start_nodes.add((nid, s_line))
+
+        # Also treat Function definition parameter nodes as potential sources
+        for nid, label in nodes.items():
+            if label.startswith("Function ") and nid not in [s[0] for s in start_nodes]:
+                start_nodes.add((nid, node_linenos.get(nid, 1)))
+
+        for start_node, src_line in start_nodes:
+            queue = deque([(start_node, [start_node], [])])
+            visited = set()
+
+            while queue:
+                curr_node, path, var_chain = queue.popleft()
+                if curr_node in visited:
+                    continue
+                visited.add(curr_node)
+
+                curr_line = node_linenos.get(curr_node, 0)
+                if curr_line in sink_findings_by_line and curr_node != start_node:
+                    finding = sink_findings_by_line[curr_line]
+                    flow_key = (start_node, curr_node, finding.get('cwe'))
+                    if flow_key not in seen_flows:
+                        seen_flows.add(flow_key)
+                        src_label = nodes.get(start_node, start_node)
+                        tgt_label = nodes.get(curr_node, curr_node)
+                        flow_vars = " -> ".join(var_chain) if var_chain else "data"
+                        tainted_flows.append({
+                            'source': src_label,
+                            'target': tgt_label,
+                            'source_node': start_node,
+                            'sink_node': curr_node,
+                            'source_line': src_line,
+                            'sink_line': curr_line,
+                            'variable': flow_vars,
+                            'cwe': finding.get('cwe'),
+                            'description': (
+                                f"Untrusted input from line {src_line} [{src_label}] flows via "
+                                f"'{flow_vars}' into {finding.get('cwe')} sink at line {curr_line} [{tgt_label}]"
+                            )
+                        })
+
+                for next_node, var_name in data_adj.get(curr_node, []):
+                    if next_node not in visited:
+                        queue.append((next_node, path + [next_node], var_chain + [var_name]))
 
         return tainted_flows
+
+    def _compute_proportional_scores(self, findings: List[Dict]) -> Tuple[float, int]:
+        """
+        Calculates risk score (0.0 - 10.0) and security score (0 - 100) using a
+        calibrated diminishing-penalty model. Prevents saturation cliffs at 0 so
+        partial optimizations produce proportional, visible health score gains.
+        """
+        if not findings:
+            return 0.0, 100
+
+        factor = 1.0
+        sev_penalties = {'CRITICAL': 0.28, 'HIGH': 0.16, 'MEDIUM': 0.08, 'LOW': 0.03}
+        for f in findings:
+            sev = f.get('severity', 'LOW').upper()
+            factor *= (1.0 - sev_penalties.get(sev, 0.05))
+
+        sec_score = max(0, min(100, int(round(100.0 * factor))))
+        risk_score = round(max(0.0, min(10.0, (100.0 - sec_score) / 10.0)), 1)
+        return risk_score, sec_score
 
     def _compute_risk_score(self, findings: List[Dict]) -> float:
         """

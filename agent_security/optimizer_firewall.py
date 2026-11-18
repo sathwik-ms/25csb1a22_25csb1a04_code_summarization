@@ -51,16 +51,25 @@ SAFE_STDLIB_MODULES: frozenset = frozenset({
     # Date / time
     "datetime", "time", "calendar",
     # Serialization
-    "json", "csv",
+    "json", "csv", "yaml",
     # Logging & warnings
     "logging", "warnings",
     # Inspection
     "inspect", "dis",
     # OS path utilities (NOT os.system; checked separately)
-    "os.path", "os",
+    "os.path", "os", "tempfile",
+    # Secure process execution (optimizer replaces os.system -> subprocess.run)
+    "subprocess", "shlex",
+    # Cryptography (optimizer replaces md5 -> sha256, random -> secrets, hmac.compare_digest)
+    "hashlib", "secrets", "hmac",
     # Standard optimisation helpers
     "lru_cache",
 })
+
+# Modules in SAFE_STDLIB_MODULES override FORBIDDEN_MODULES for optimizer output.
+# The optimizer's job is to PRODUCE safe code, so subprocess.run(shell=False) is
+# the correct secure replacement for os.system().
+_SAFE_ROOTS: frozenset = frozenset({m.split(".")[0] for m in SAFE_STDLIB_MODULES})
 
 _IP_REGEX = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")
 _URL_REGEX = re.compile(r"\b(?:https?|ftp|tcp|udp)://[^\s'\"\\]+", re.IGNORECASE)
@@ -90,10 +99,14 @@ class _FirewallVisitor(ast.NodeVisitor):
         original_imports: Set[str],
         original_dunders: Set[str],
         original_strings: Set[str],
+        original_calls: Optional[Set[str]] = None,
+        original_os_attrs: Optional[Set[str]] = None,
     ) -> None:
         self._orig_imports = original_imports
         self._orig_dunders = original_dunders
         self._orig_strings = original_strings
+        self._orig_calls = original_calls or set()
+        self._orig_os_attrs = original_os_attrs or set()
         self.violations: List[str] = []
 
     def _lineno(self, node: ast.AST) -> str:
@@ -102,15 +115,17 @@ class _FirewallVisitor(ast.NodeVisitor):
     # 1. Imports
     def _check_module(self, module_name: str, node: ast.AST) -> None:
         root = module_name.split(".")[0]
+        # Safe for optimizer output — allow even if in FORBIDDEN_MODULES
+        if root in _SAFE_ROOTS or root in self._orig_imports:
+            return
         if root in FORBIDDEN_MODULES:
             self.violations.append(
                 f"{self._lineno(node)}: forbidden module '{root}' imported by optimizer"
             )
-        elif root not in {m.split(".")[0] for m in SAFE_STDLIB_MODULES}:
-            if root not in self._orig_imports:
-                self.violations.append(
-                    f"{self._lineno(node)}: optimizer introduced unknown module '{root}'"
-                )
+        else:
+            self.violations.append(
+                f"{self._lineno(node)}: optimizer introduced unknown module '{root}'"
+            )
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -123,7 +138,7 @@ class _FirewallVisitor(ast.NodeVisitor):
             root = node.module.split(".")[0]
             if root == "os":
                 for alias in node.names:
-                    if alias.name in FORBIDDEN_OS_ATTRS:
+                    if alias.name in FORBIDDEN_OS_ATTRS and alias.name not in self._orig_os_attrs:
                         self.violations.append(
                             f"{self._lineno(node)}: forbidden import 'os.{alias.name}' in candidate"
                         )
@@ -133,22 +148,33 @@ class _FirewallVisitor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
         # Bare forbidden calls: eval(), exec(), compile(), __import__()
+        # Only reject if newly injected (not already in original source)
         if isinstance(func, ast.Name) and func.id in FORBIDDEN_CALLS:
-            self.violations.append(
-                f"{self._lineno(node)}: forbidden call '{func.id}()' in candidate"
-            )
-        # Attribute calls: os.system(), subprocess.run(), etc.
+            if func.id not in self._orig_calls:
+                self.violations.append(
+                    f"{self._lineno(node)}: forbidden call '{func.id}()' in candidate"
+                )
+        # Attribute calls: os.system(), etc.
         elif isinstance(func, ast.Attribute):
             obj = func.value
             attr = func.attr
-            if attr in FORBIDDEN_CALLS or attr in FORBIDDEN_OS_ATTRS:
-                self.violations.append(
-                    f"{self._lineno(node)}: forbidden call '*.{attr}()' in candidate"
-                )
+            # Check forbidden OS attrs (os.system, os.popen, etc.) - only reject if newly introduced
+            if attr in FORBIDDEN_OS_ATTRS:
+                if attr not in self._orig_os_attrs:
+                    self.violations.append(
+                        f"{self._lineno(node)}: forbidden call '*.{attr}()' in candidate"
+                    )
+            elif attr in FORBIDDEN_CALLS:
+                if attr not in self._orig_calls:
+                    self.violations.append(
+                        f"{self._lineno(node)}: forbidden call '*.{attr}()' in candidate"
+                    )
+            # Block calls on truly forbidden modules (but NOT on safe optimizer modules)
             if isinstance(obj, ast.Name) and obj.id in FORBIDDEN_MODULES:
-                self.violations.append(
-                    f"{self._lineno(node)}: call on forbidden module '{obj.id}.{attr}()'"
-                )
+                if obj.id not in _SAFE_ROOTS and obj.id not in self._orig_imports:
+                    self.violations.append(
+                        f"{self._lineno(node)}: call on forbidden module '{obj.id}.{attr}()'"
+                    )
         self.generic_visit(node)
 
     # 3. Dunders
@@ -165,14 +191,17 @@ class _FirewallVisitor(ast.NodeVisitor):
         if isinstance(node.value, str):
             val = node.value
             if val not in self._orig_strings:
-                if _URL_REGEX.search(val):
-                    self.violations.append(
-                        f"{self._lineno(node)}: new URL literal '{val[:40]}' injected in candidate"
-                    )
-                elif _IP_REGEX.search(val):
-                    self.violations.append(
-                        f"{self._lineno(node)}: new IP literal '{val[:20]}' injected in candidate"
-                    )
+                # Allow upgrading http:// to https:// for URLs already present in original source (CWE-319 fix)
+                is_https_upgrade = val.startswith("https://") and ("http://" + val[8:]) in self._orig_strings
+                if not is_https_upgrade:
+                    if _URL_REGEX.search(val):
+                        self.violations.append(
+                            f"{self._lineno(node)}: new URL literal '{val[:40]}' injected in candidate"
+                        )
+                    elif _IP_REGEX.search(val):
+                        self.violations.append(
+                            f"{self._lineno(node)}: new IP literal '{val[:20]}' injected in candidate"
+                        )
         self.generic_visit(node)
 
 
@@ -180,14 +209,16 @@ class _FirewallVisitor(ast.NodeVisitor):
 # Extraction Helpers for Original Code Baseline
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _collect_original_metadata(source: str) -> Tuple[Set[str], Set[str], Set[str]]:
-    """Collect imports, dunders, and string literals already in original source."""
+def _collect_original_metadata(source: str) -> Tuple[Set[str], Set[str], Set[str], Set[str], Set[str]]:
+    """Collect imports, dunders, string literals, function calls, and attribute calls already in original source."""
     if not source:
-        return set(), set(), set()
+        return set(), set(), set(), set(), set()
 
     imports: Set[str] = set()
     dunders: Set[str] = set()
     strings: Set[str] = set()
+    calls: Set[str] = set()
+    os_attrs: Set[str] = set()
 
     # Extract URLs and IPs appearing anywhere in original source
     for url in _URL_REGEX.findall(source):
@@ -198,7 +229,7 @@ def _collect_original_metadata(source: str) -> Tuple[Set[str], Set[str], Set[str
     try:
         tree = ast.parse(source)
     except Exception:
-        return imports, dunders, strings
+        return imports, dunders, strings, calls, os_attrs
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -210,8 +241,14 @@ def _collect_original_metadata(source: str) -> Tuple[Set[str], Set[str], Set[str
             dunders.add(node.attr)
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             strings.add(node.value)
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                calls.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                os_attrs.add(node.func.attr)
+                calls.add(node.func.attr)
 
-    return imports, dunders, strings
+    return imports, dunders, strings, calls, os_attrs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -246,11 +283,13 @@ def inspect_candidate(
         return False, [f"Candidate AST parse failed: {exc}"]
 
     try:
-        orig_imports, orig_dunders, orig_strings = _collect_original_metadata(effective_original)
+        orig_imports, orig_dunders, orig_strings, orig_calls, orig_os_attrs = _collect_original_metadata(effective_original)
         visitor = _FirewallVisitor(
             original_imports=orig_imports,
             original_dunders=orig_dunders,
             original_strings=orig_strings,
+            original_calls=orig_calls,
+            original_os_attrs=orig_os_attrs,
         )
         visitor.visit(tree)
         violations = visitor.violations

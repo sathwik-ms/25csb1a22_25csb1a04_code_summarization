@@ -1,30 +1,35 @@
 """
-graph_visualizer.py - Static & High-Contrast PDG Graph Visualizer
-=================================================================
-Renders a clean, attractive, and completely static Program Dependence Graph (PDG)
-using vis.js Network with hierarchical directed tree layout.
+graph_visualizer.py - High-Performance Orderly Architectural Grid & Zero-Washout PDG Visualizer
+================================================================================================
+Renders a structured, beautiful, and responsive Program Dependence Graph (PDG).
 
-Features:
-  - 100% Static: Physics disabled by default (no bouncing, shaking, or drifting)
-  - Attractive Modern UI: Glassmorphism toolbar, high-contrast dark theme, and glowing accents
-  - Clear Node Typology: Function, Branch (If/For), Statement, Return, and Tainted Sinks
-  - Dual Edge Semantics: Control Flow (dashed cyan) vs. Data Dependency (solid emerald)
-  - Taint Isolation: Highlights critical vulnerable paths in glowing crimson red
-  - Interactive Inspector: Click any node to inspect incoming and outgoing dependencies
+Key Innovations:
+  1. Dynamic Architectural Gallery Grid: Automatically calculates the optimal 16:10 aspect
+     ratio based on function count, organizing functions into clean, vertical card columns.
+  2. Zero Washout on Hover: Vis.js background-lightening is completely suppressed by explicitly
+     locking values.color to the deep theme palette; text is locked to crisp bold white with a
+     solid 3px outline.
+  3. Clutter Elimination: Cross-function data edges and 100+ radiating root lines are hidden by
+     default on large graphs, transforming the spaghetti hairball into an orderly architectural blueprint.
+  4. Real-time Scope Isolation: Select any function to immediately zoom and focus on its isolated
+     control & data flow.
+  5. Interactive Glassmorphic HUD: Floating glass pane displaying node ID, semantic logic, degree,
+     and taint status with zero intrusive browser popups.
 """
 
 import json
-from typing import Dict, List, Optional, Any
+import math
+from typing import Dict, List, Optional, Any, Set
 
 
 def generate_pdg_html(
     pdg_graph: Dict[str, Any],
     tainted_flows: Optional[List[Dict[str, Any]]] = None,
-    height: str = "550px",
+    height: str = "720px",
     background: str = "#0b0f19"
 ) -> str:
     """
-    Generates a full interactive HTML snippet rendering the PDG statically with vis.js.
+    Generates an orderly, high-contrast, structured HTML visualization for the PDG.
     """
     if tainted_flows is None:
         tainted_flows = []
@@ -45,112 +50,214 @@ def generate_pdg_html(
     raw_nodes = pdg_graph.get("nodes", {})
     raw_edges = pdg_graph.get("edges", [])
 
+    # 1. Discover Functions & Map Hierarchy
+    functions_map: Dict[str, str] = {}
+    for nid, lbl in raw_nodes.items():
+        if lbl.startswith("Function "):
+            fname = lbl.replace("Function ", "").split("(")[0].strip()
+            functions_map[nid] = fname
+
+    assigned_nodes: Set[str] = set()
+    fn_groups: List[tuple] = []  # (fn_id, fname, [child_node_ids])
+
+    for fn_id, fname in functions_map.items():
+        child_nodes = []
+        visited = {fn_id}
+        queue = [fn_id]
+        while queue:
+            curr = queue.pop(0)
+            for e in raw_edges:
+                if e.get("source") == curr and e.get("kind") == "Control":
+                    tgt = e.get("target")
+                    if tgt and tgt not in visited and tgt not in functions_map and tgt != "root":
+                        visited.add(tgt)
+                        child_nodes.append(tgt)
+                        queue.append(tgt)
+        assigned_nodes.update(visited)
+        fn_groups.append((fn_id, fname, child_nodes))
+
+    node_to_func: Dict[str, str] = {}
+    for fn_id, fname, children in fn_groups:
+        node_to_func[fn_id] = fname
+        for c in children:
+            node_to_func[c] = fname
+
+    available_functions = sorted([fname for _, fname, _ in fn_groups])
+    globals_list = [nid for nid in raw_nodes if nid not in assigned_nodes and nid != "root"]
+
+    # 2. Compute Dynamic Orderly 2D Gallery Grid Coordinates
+    total_funcs = len(fn_groups)
+    if total_funcs <= 1:
+        COLS = 1
+    elif total_funcs == 2:
+        COLS = 2
+    else:
+        # Dynamic Golden Aspect Ratio calculation
+        COLS = max(3, int(math.ceil(math.sqrt(total_funcs * 1.6))))
+
+    COL_WIDTH = 340
+    CARD_SPACING_Y = 86
+
+    # Dynamic row vertical offset calculation
+    total_rows = (total_funcs + COLS - 1) // COLS if COLS > 0 else 1
+    row_y_offsets = [0] * max(1, total_rows)
+    current_y = 120
+    for r in range(total_rows):
+        row_y_offsets[r] = current_y
+        row_slice = fn_groups[r * COLS : (r + 1) * COLS]
+        max_c = max([len(c) for _, _, c in row_slice] + [0])
+        row_height = (max_c + 1) * CARD_SPACING_Y + 60
+        current_y += row_height
+
+    node_positions: Dict[str, Dict[str, int]] = {}
+
+    # Root node positioned at top-center
+    grid_center_x = max(0, ((COLS - 1) * COL_WIDTH) // 2)
+    node_positions["root"] = {"x": grid_center_x, "y": -140}
+
+    # Top-level global module statements arranged in a neat top band
+    for idx, gid in enumerate(globals_list):
+        gx = (idx % max(1, COLS)) * COL_WIDTH
+        gy = -40 + (idx // max(1, COLS)) * 75
+        node_positions[gid] = {"x": gx, "y": gy}
+
+    # Position each function stack
+    for idx, (fn_id, fname, children) in enumerate(fn_groups):
+        col = idx % COLS
+        row = idx // COLS
+        base_x = col * COL_WIDTH
+        base_y = row_y_offsets[row]
+
+        # Function header card
+        node_positions[fn_id] = {"x": base_x, "y": base_y}
+
+        # Children flow straight down in an orderly vertical column
+        for c_idx, cid in enumerate(children):
+            node_positions[cid] = {"x": base_x, "y": base_y + (c_idx + 1) * CARD_SPACING_Y}
+
+    # Fallback positioning for any remaining nodes
+    for nid in raw_nodes:
+        if nid not in node_positions:
+            node_positions[nid] = {"x": grid_center_x, "y": 0}
+
+    # 3. Build High-Contrast Aesthetic Nodes (Zero Washout Guaranteed)
     vis_nodes = []
     for node_id, label in raw_nodes.items():
         is_tainted = node_id in tainted_node_ids
         clean_label = label.replace("\n", " ").strip()
+        scope = node_to_func.get(node_id, "Global Scope" if node_id != "root" else "Program Root")
+        pos = node_positions.get(node_id, {"x": 0, "y": 0})
 
-        # Categorize node style
+        # Saturated, rich color palettes with distinct typology
         if is_tainted:
-            color = {
-                "background": "#7f1d1d",
-                "border": "#ef4444",
-                "highlight": {"background": "#991b1b", "border": "#f87171"}
-            }
-            font = {"color": "#fee2e2", "face": "system-ui, -apple-system, sans-serif", "size": 12, "bold": True}
-            title = f"🚨 CRITICAL TAINTED SINK: {node_id}\n{clean_label}"
-            badge = "⚠️ TAINTED"
+            bg = "#3b0808"
+            border = "#ef4444"
+            glow = "#f87171"
+            badge = "⚠️ TAINT"
+            type_title = "CRITICAL INSECURE SINK"
         elif node_id == "root":
-            color = {
-                "background": "#1e293b",
-                "border": "#38bdf8",
-                "highlight": {"background": "#334155", "border": "#7dd3fc"}
-            }
-            font = {"color": "#e2e8f0", "face": "system-ui, -apple-system, sans-serif", "size": 12, "bold": True}
-            title = "Program Entry Root Node"
+            bg = "#0c1d37"
+            border = "#38bdf8"
+            glow = "#7dd3fc"
             badge = "ROOT"
+            type_title = "Program Entry Root Node"
         elif clean_label.startswith("Function"):
-            color = {
-                "background": "#312e81",
-                "border": "#6366f1",
-                "highlight": {"background": "#3730a3", "border": "#818cf8"}
-            }
-            font = {"color": "#e0e7ff", "face": "system-ui, -apple-system, sans-serif", "size": 12, "bold": True}
-            title = f"Function Declaration: {clean_label}"
+            bg = "#20124d"
+            border = "#a855f7"
+            glow = "#c084fc"
             badge = "FUNC"
+            type_title = f"Function: {scope}"
         elif clean_label.startswith("If") or clean_label.startswith("For") or clean_label.startswith("While"):
-            color = {
-                "background": "#78350f",
-                "border": "#f59e0b",
-                "highlight": {"background": "#92400e", "border": "#fbbf24"}
-            }
-            font = {"color": "#fef3c7", "face": "system-ui, -apple-system, sans-serif", "size": 12, "bold": True}
-            title = f"Control Decision Branch: {clean_label}"
+            bg = "#382006"
+            border = "#fbbf24"
+            glow = "#fde047"
             badge = "BRANCH"
+            type_title = "Control Branch Decision"
         elif clean_label.startswith("Return"):
-            color = {
-                "background": "#581c87",
-                "border": "#a855f7",
-                "highlight": {"background": "#6b21a8", "border": "#c084fc"}
-            }
-            font = {"color": "#f3e8ff", "face": "system-ui, -apple-system, sans-serif", "size": 12, "bold": True}
-            title = f"Return Statement: {clean_label}"
+            bg = "#3b0819"
+            border = "#f43f5e"
+            glow = "#fb7185"
             badge = "RETURN"
+            type_title = "Return Statement"
         else:
             # Statement / Assign
-            color = {
-                "background": "#064e3b",
-                "border": "#10b981",
-                "highlight": {"background": "#065f46", "border": "#34d399"}
-            }
-            font = {"color": "#d1fae5", "face": "system-ui, -apple-system, sans-serif", "size": 12, "bold": False}
-            title = f"Statement: {clean_label}"
+            bg = "#042a1d"
+            border = "#10b981"
+            glow = "#34d399"
             badge = "STMT"
+            type_title = "Active Statement"
 
-        # Formatted display label
+        color = {
+            "background": bg,
+            "border": border,
+            "hover": {"background": bg, "border": glow},
+            "highlight": {"background": bg, "border": glow}
+        }
+
+        font = {
+            "color": "#ffffff",
+            "face": "Consolas, 'Cascadia Code', ui-monospace, SFMono-Regular, monospace",
+            "size": 12,
+            "bold": True,
+            "strokeWidth": 3,
+            "strokeColor": "#000000"
+        }
+
         truncated = clean_label[:26] + "..." if len(clean_label) > 26 else clean_label
         display_label = f"[{badge}] {node_id}\n{truncated}"
 
         vis_nodes.append({
             "id": node_id,
             "label": display_label,
-            "title": title,
+            "full_code": clean_label,
+            "node_type": badge,
+            "type_title": type_title,
+            "scope": scope,
+            "is_tainted": is_tainted,
+            "x": pos["x"],
+            "y": pos["y"],
             "shape": "box",
             "shapeProperties": {"borderRadius": 8},
+            "widthConstraint": {"minimum": 240, "maximum": 280},
             "color": color,
             "borderWidth": 2,
             "borderWidthSelected": 3,
             "font": font,
             "margin": {"top": 8, "bottom": 8, "left": 12, "right": 12},
-            "shadow": {"enabled": True, "color": "rgba(0,0,0,0.45)", "size": 8, "x": 1, "y": 2}
+            "shadow": {"enabled": True, "color": "rgba(0,0,0,0.65)", "size": 8, "x": 1, "y": 2}
         })
 
+    # 4. Build Structured Edges & Classify Clutter
     vis_edges = []
+    is_large_graph = len(fn_groups) >= 6 or len(raw_nodes) >= 40
+
     for idx, e in enumerate(raw_edges):
         src = e.get("source")
         tgt = e.get("target")
         kind = e.get("kind")
         lbl = e.get("label", "")
         is_tainted_edge = (src, tgt) in tainted_edge_pairs
+        is_root_edge = (src == "root" or tgt == "root")
+
+        src_scope = node_to_func.get(src, "global")
+        tgt_scope = node_to_func.get(tgt, "global")
+        is_cross_scope = (src_scope != tgt_scope and not is_root_edge)
 
         if is_tainted_edge:
-            color = {"color": "#ef4444", "highlight": "#dc2626"}
+            color = {"color": "#ef4444", "highlight": "#f87171", "hover": "#fca5a5"}
             width = 3.5
             dashes = False
-            title = f"🚨 TAINT PATHWAY: Untrusted variable '{lbl}' flows into sensitive sink"
             edge_lbl = f"⚠ {lbl}"
         elif kind == "Control":
-            color = {"color": "#38bdf8", "highlight": "#0ea5e9"}
-            width = 1.8
+            color = {"color": "#38bdf8", "highlight": "#7dd3fc", "hover": "#bae6fd"}
+            width = 2.0
             dashes = [5, 5]
-            title = f"Control Dependency: {src} -> {tgt}"
             edge_lbl = ""
         else:
             # Data flow
-            color = {"color": "#34d399", "highlight": "#10b981"}
+            color = {"color": "#34d399", "highlight": "#6ee7b7", "hover": "#a7f3d0"}
             width = 2.0
             dashes = False
-            title = f"Data Dependency: {src} -> {tgt} ('{lbl}')"
             edge_lbl = lbl
 
         vis_edges.append({
@@ -160,19 +267,25 @@ def generate_pdg_html(
             "label": edge_lbl,
             "kind": kind,
             "is_tainted": is_tainted_edge,
-            "title": title,
+            "is_root_edge": is_root_edge,
+            "is_cross_scope": is_cross_scope,
+            "src_scope": src_scope,
+            "tgt_scope": tgt_scope,
             "color": color,
             "width": width,
             "dashes": dashes,
-            "arrows": {"to": {"enabled": True, "scaleFactor": 0.8}},
+            "arrows": {"to": {"enabled": True, "scaleFactor": 0.85}},
             "smooth": {"type": "cubicBezier", "roundness": 0.2},
-            "font": {"color": "#94a3b8", "size": 11, "face": "system-ui, sans-serif", "align": "horizontal", "strokeWidth": 0}
+            "font": {"color": "#94a3b8", "size": 10, "face": "Consolas, monospace", "strokeWidth": 2, "strokeColor": "#0b0f19"}
         })
 
-    nodes_json = json.dumps(vis_nodes)
-    edges_json = json.dumps(vis_edges)
-    safe_nodes_json = nodes_json.replace("</script>", "<\\/script>")
-    safe_edges_json = edges_json.replace("</script>", "<\\/script>")
+    nodes_json = json.dumps(vis_nodes).replace("</script>", "<\\/script>")
+    edges_json = json.dumps(vis_edges).replace("</script>", "<\\/script>")
+    funcs_json = json.dumps(available_functions).replace("</script>", "<\\/script>")
+
+    total_nodes = len(vis_nodes)
+    default_root_checked = "false" if is_large_graph else "true"
+    default_cross_checked = "false" if is_large_graph else "true"
 
     html_template = f"""
 <!DOCTYPE html>
@@ -181,97 +294,186 @@ def generate_pdg_html(
   <meta charset="utf-8" />
   <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
   <style>
+    * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
       padding: 0;
-      background: radial-gradient(ellipse at 50% 20%, #1e293b 0%, #0f172a 50%, #020617 100%);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      background: radial-gradient(ellipse at 50% 15%, #131c2e 0%, #0c121e 50%, #050811 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       color: #e2e8f0;
       overflow: hidden;
+      width: 100%;
+      height: 100vh;
     }}
     #pdg-container {{
       width: 100%;
       height: {height};
       position: relative;
     }}
+    /* Modern Glassmorphic Top Bar */
     .pdg-toolbar {{
       position: absolute;
-      top: 12px;
-      left: 14px;
+      top: 10px;
+      left: 12px;
+      right: 12px;
       z-index: 100;
-      background: rgba(15, 23, 42, 0.88);
-      backdrop-filter: blur(10px);
-      padding: 8px 16px;
+      background: rgba(12, 18, 30, 0.94);
+      backdrop-filter: blur(14px);
+      padding: 7px 14px;
       border-radius: 10px;
-      border: 1px solid rgba(51, 65, 85, 0.8);
+      border: 1px solid rgba(56, 189, 248, 0.3);
       display: flex;
-      gap: 14px;
+      flex-wrap: wrap;
+      gap: 10px;
       align-items: center;
+      justify-content: space-between;
       font-size: 12px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
     }}
-    .status-badge {{
-      background: rgba(16, 185, 129, 0.15);
-      color: #34d399;
-      padding: 3px 8px;
+    .toolbar-left, .toolbar-right {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }}
+    .select-pill {{
+      background: #172338;
+      color: #38bdf8;
+      border: 1px solid #334767;
+      padding: 5px 10px;
       border-radius: 6px;
-      font-weight: 600;
       font-size: 11px;
-      border: 1px solid rgba(16, 185, 129, 0.3);
+      font-weight: 600;
+      outline: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      max-width: 260px;
+    }}
+    .select-pill:hover, .select-pill:focus {{
+      border-color: #38bdf8;
+      background: #0d1624;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+    }}
+    .search-input {{
+      background: #172338;
+      color: #f8fafc;
+      border: 1px solid #334767;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      outline: none;
+      width: 150px;
+      transition: all 0.2s ease;
+    }}
+    .search-input:focus {{
+      border-color: #38bdf8;
+      width: 190px;
+    }}
+    .btn-action {{
+      background: #172338;
+      color: #e2e8f0;
+      border: 1px solid #334767;
+      padding: 5px 11px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
       display: inline-flex;
       align-items: center;
       gap: 5px;
-    }}
-    .pdg-toolbar label {{
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      user-select: none;
-      color: #cbd5e1;
-    }}
-    .pdg-toolbar label:hover {{
-      color: #ffffff;
-    }}
-    .btn-action {{
-      background: #1e293b;
-      color: #e2e8f0;
-      border: 1px solid #475569;
-      padding: 4px 10px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 11px;
-      font-weight: 500;
       transition: all 0.2s ease;
     }}
     .btn-action:hover {{
-      background: #334155;
+      background: #1e3a5f;
       color: #38bdf8;
       border-color: #38bdf8;
     }}
+    .filter-label {{
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      user-select: none;
+      color: #cbd5e1;
+      font-size: 11px;
+    }}
+    .filter-label:hover {{ color: #ffffff; }}
+    /* Interactive Glassmorphic HUD */
+    #node-hud {{
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      z-index: 100;
+      background: rgba(10, 16, 28, 0.96);
+      backdrop-filter: blur(16px);
+      padding: 12px 16px;
+      border-radius: 10px;
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      max-width: 480px;
+      min-width: 300px;
+      font-size: 12px;
+      box-shadow: 0 10px 35px rgba(0, 0, 0, 0.75);
+    }}
+    .hud-title {{
+      font-weight: 700;
+      color: #38bdf8;
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }}
+    .hud-scope {{
+      background: rgba(168, 85, 247, 0.2);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.4);
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+    }}
+    .hud-code {{
+      background: #050811;
+      border: 1px solid #1e293b;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-family: Consolas, 'Cascadia Code', ui-monospace, monospace;
+      color: #f8fafc;
+      font-size: 11px;
+      word-break: break-all;
+      max-height: 80px;
+      overflow-y: auto;
+      margin-bottom: 6px;
+    }}
+    .hud-meta {{
+      display: flex;
+      gap: 14px;
+      font-size: 11px;
+      color: #94a3b8;
+    }}
+    /* Clean Legend */
     .legend {{
       position: absolute;
       bottom: 12px;
-      right: 14px;
-      z-index: 100;
-      background: rgba(15, 23, 42, 0.88);
-      backdrop-filter: blur(10px);
-      padding: 10px 14px;
+      right: 12px;
+      z-index: 90;
+      background: rgba(10, 16, 28, 0.92);
+      backdrop-filter: blur(12px);
+      padding: 9px 13px;
       border-radius: 10px;
       border: 1px solid rgba(51, 65, 85, 0.8);
       font-size: 11px;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 5px;
       box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
     }}
     .legend-title {{
       font-weight: 700;
       color: #94a3b8;
-      margin-bottom: 2px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
       font-size: 10px;
+      letter-spacing: 0.5px;
     }}
     .legend-item {{
       display: flex;
@@ -302,66 +504,82 @@ def generate_pdg_html(
       background: #ef4444;
       display: inline-block;
     }}
-    #node-details {{
-      position: absolute;
-      top: 12px;
-      right: 14px;
-      z-index: 100;
-      background: rgba(15, 23, 42, 0.94);
-      backdrop-filter: blur(10px);
-      padding: 12px 16px;
-      border-radius: 10px;
-      border: 1px solid #38bdf8;
-      font-size: 12px;
-      display: none;
-      max-width: 320px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-    }}
   </style>
 </head>
 <body>
   <div id="pdg-container">
+    <!-- Toolbar -->
     <div class="pdg-toolbar">
-      <span class="status-badge">🔒 Static PDG (Fixed)</span>
-      <label><input type="checkbox" id="toggle-control" checked /> Control Edges</label>
-      <label><input type="checkbox" id="toggle-data" checked /> Data Edges</label>
-      <label><input type="checkbox" id="toggle-taint-only" /> Only Tainted</label>
-      <button class="btn-action" onclick="network.fit({{animation: {{duration: 400}}}})">Center & Fit</button>
+      <div class="toolbar-left">
+        <!-- Scope Filter -->
+        <label style="font-weight:700; color:#38bdf8;">🎯 Scope:</label>
+        <select id="scope-selector" class="select-pill">
+          <option value="ALL">🌐 All Code ({total_nodes} nodes)</option>
+        </select>
+        <input type="text" id="node-search" class="search-input" placeholder="🔍 Search logic..." />
+        <span style="color:#64748b; font-size:11px;">|</span>
+        <span style="color:#94a3b8; font-size:11px; font-weight:600;">📐 Layout: Orderly Architectural Grid</span>
+      </div>
+
+      <div class="toolbar-right">
+        <label class="filter-label"><input type="checkbox" id="toggle-intra" checked /> Intra-Func</label>
+        <label class="filter-label"><input type="checkbox" id="toggle-cross" { 'checked' if default_cross_checked == 'true' else '' } /> Cross-Func</label>
+        <label class="filter-label"><input type="checkbox" id="toggle-root" { 'checked' if default_root_checked == 'true' else '' } /> Root Fan-out</label>
+        <label class="filter-label"><input type="checkbox" id="toggle-taint-only" /> Only Tainted</label>
+        <button class="btn-action" onclick="resetView()">⛶ Fit View</button>
+      </div>
     </div>
 
-    <div id="node-details"></div>
+    <!-- Live HUD -->
+    <div id="node-hud">
+      <div class="hud-title">
+        <span id="hud-name">Hover or click any node</span>
+        <span id="hud-scope-badge" class="hud-scope">Global</span>
+      </div>
+      <div id="hud-code-box" class="hud-code">Point your mouse at nodes to inspect semantic AST logic, control branches, and data flows.</div>
+      <div class="hud-meta">
+        <span>⬅️ In-Degree: <strong id="hud-in" style="color:#38bdf8;">0</strong></span>
+        <span>➡️ Out-Degree: <strong id="hud-out" style="color:#34d399;">0</strong></span>
+        <span id="hud-taint-stat" style="display:none; color:#ef4444; font-weight:700;">🚨 TAINTED</span>
+      </div>
+    </div>
 
+    <!-- Legend -->
     <div class="legend">
-      <div class="legend-title">PDG Node Typology</div>
-      <div class="legend-item"><span class="dot" style="background:#312e81; border: 1px solid #6366f1;"></span> Function Def</div>
-      <div class="legend-item"><span class="dot" style="background:#78350f; border: 1px solid #f59e0b;"></span> Branch (If/For)</div>
-      <div class="legend-item"><span class="dot" style="background:#064e3b; border: 1px solid #10b981;"></span> Statement / Assign</div>
-      <div class="legend-item"><span class="dot" style="background:#581c87; border: 1px solid #a855f7;"></span> Return Stmt</div>
-      <div class="legend-item"><span class="dot" style="background:#7f1d1d; border: 1px solid #ef4444;"></span> Insecure Sink</div>
-      <div style="height: 4px;"></div>
-      <div class="legend-title">Edge Dependencies</div>
+      <div class="legend-title">Typology</div>
+      <div class="legend-item"><span class="dot" style="background:#20124d; border: 1px solid #a855f7;"></span> Function Def</div>
+      <div class="legend-item"><span class="dot" style="background:#382006; border: 1px solid #fbbf24;"></span> Branch (If/For)</div>
+      <div class="legend-item"><span class="dot" style="background:#042a1d; border: 1px solid #10b981;"></span> Statement / Assign</div>
+      <div class="legend-item"><span class="dot" style="background:#3b0819; border: 1px solid #f43f5e;"></span> Return Stmt</div>
+      <div class="legend-item"><span class="dot" style="background:#3b0808; border: 1px solid #ef4444;"></span> Insecure Sink</div>
+      <div style="height: 2px;"></div>
+      <div class="legend-title">Edges</div>
       <div class="legend-item"><span class="line-dash"></span> Control Edge</div>
-      <div class="legend-item"><span class="line-solid"></span> Data Dependency</div>
+      <div class="legend-item"><span class="line-solid"></span> Data Flow</div>
       <div class="legend-item"><span class="line-taint"></span> Tainted Flow</div>
     </div>
   </div>
 
   <script type="text/javascript">
-    function escapeHtml(s) {{
-      if (!s) return '';
-      return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    }}
+    const rawNodes = {nodes_json};
+    const rawEdges = {edges_json};
+    const availableFuncs = {funcs_json};
 
-    const rawNodes = {safe_nodes_json};
-    const rawEdges = {safe_edges_json};
+    // Fast lookup map for nodes
+    const rawNodesMap = {{}};
+    rawNodes.forEach(n => {{ rawNodesMap[n.id] = n; }});
 
     const container = document.getElementById("pdg-container");
-    const nodeDetails = document.getElementById("node-details");
+    const scopeSelector = document.getElementById("scope-selector");
+    const nodeSearch = document.getElementById("node-search");
+
+    // Populate scope dropdown
+    availableFuncs.forEach(fn => {{
+      const opt = document.createElement("option");
+      opt.value = fn;
+      opt.textContent = `⚡ fn: ${{fn}}`;
+      scopeSelector.appendChild(opt);
+    }});
 
     const nodesDataSet = new vis.DataSet(rawNodes);
     const edgesDataSet = new vis.DataSet(rawEdges);
@@ -371,88 +589,165 @@ def generate_pdg_html(
       edges: edgesDataSet
     }};
 
-    // 100% Static Layout: Hierarchical directed tree with physics completely disabled
-    const options = {{
-      layout: {{
-        hierarchical: {{
-          enabled: true,
-          direction: "UD",            // Up-to-Down flow (Root at top, Returns at bottom)
-          sortMethod: "directed",      // Follows semantic flow
-          levelSeparation: 95,
-          nodeSpacing: 180,
-          treeSpacing: 220,
-          blockShifting: true,
-          edgeMinimization: true,
-          parentCentralization: true
-        }}
-      }},
+    // 100% STATIC ORDERLY ARCHITECTURAL GRID (Physics Disabled, Zero Jitter, Zero Washout)
+    const baseOptions = {{
       physics: {{
-        enabled: false               // Completely static - zero bouncing, zero movement
+        enabled: false
       }},
       interaction: {{
         hover: true,
-        tooltipDelay: 100,
+        hoverConnectedEdges: false,
         navigationButtons: true,
         keyboard: true,
-        dragNodes: true,             // Can manually reposition a node if desired without dragging others
+        dragNodes: true,
         dragView: true,
         zoomView: true
+      }},
+      nodes: {{
+        // Custom chosen handlers: ZERO WASHOUT ON HOVER
+        chosen: {{
+          node: function(values, id, selected, hovering) {{
+            const orig = rawNodesMap[id];
+            if (orig && orig.color) {{
+              // STRICTLY LOCK BACKGROUND COLOR: Never let vis.js lighten or bleach it!
+              values.color = orig.color.background;
+            }}
+            if (hovering || selected) {{
+              values.borderWidth = 3;
+              const isTaint = orig && orig.is_tainted;
+              values.borderColor = isTaint ? "#f87171" : "#38bdf8";
+              values.shadow = true;
+              values.shadowColor = isTaint ? "rgba(239, 68, 68, 0.9)" : "rgba(56, 189, 248, 0.85)";
+              values.shadowSize = 14;
+            }}
+          }},
+          label: function(values, id, selected, hovering) {{
+            // Force label text to stay pure bold white with 3px black stroke!
+            values.color = "#ffffff";
+            values.strokeWidth = 3;
+            values.strokeColor = "#000000";
+          }}
+        }}
+      }},
+      edges: {{
+        chosen: {{
+          edge: function(values, id, selected, hovering) {{
+            if (hovering || selected) {{
+              values.width = values.width * 1.5;
+            }}
+          }}
+        }}
       }}
     }};
 
-    const network = new vis.Network(container, data, options);
+    const network = new vis.Network(container, data, baseOptions);
 
     // Initial fit once loaded
     network.once("afterDrawing", function() {{
       network.fit();
     }});
 
-    // Node selection inspector
-    network.on("selectNode", function(params) {{
-      if (params.nodes.length > 0) {{
-        const nodeId = params.nodes[0];
-        const node = nodesDataSet.get(nodeId);
-        nodeDetails.style.display = "block";
-        nodeDetails.innerHTML = `
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <strong style="color:#38bdf8; font-size:13px;">Node Inspector: ${{nodeId}}</strong>
-            <button onclick="document.getElementById('node-details').style.display='none'" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-size:14px;">&times;</button>
-          </div>
-          <div style="font-size:11px; color:#cbd5e1; line-height:1.4; word-break:break-word;">
-            ${{escapeHtml(node.title).replace(/\\n/g, "<br/>")}}
-          </div>
-        `;
-      }}
-    }});
+    function resetView() {{
+      network.fit({{ animation: {{ duration: 500, easingFunction: "easeInOutQuad" }} }});
+    }}
 
-    network.on("deselectNode", function() {{
-      nodeDetails.style.display = "none";
-    }});
-
-    // Toolbar filters
-    const ctrlCheck = document.getElementById("toggle-control");
-    const dataCheck = document.getElementById("toggle-data");
+    // Filter Logic
+    const intraCheck = document.getElementById("toggle-intra");
+    const crossCheck = document.getElementById("toggle-cross");
+    const rootCheck = document.getElementById("toggle-root");
     const taintCheck = document.getElementById("toggle-taint-only");
 
-    function applyFilter() {{
-      const showCtrl = ctrlCheck.checked;
-      const showData = dataCheck.checked;
+    function applyFilters() {{
+      const selectedScope = scopeSelector.value;
+      const searchQuery = (nodeSearch.value || "").toLowerCase().trim();
+      const showIntra = intraCheck.checked;
+      const showCross = crossCheck.checked;
+      const showRoot = rootCheck.checked;
       const taintOnly = taintCheck.checked;
 
-      const filtered = rawEdges.filter(e => {{
-        if (taintOnly && !e.is_tainted) return false;
-        if (e.kind === "Control" && !showCtrl) return false;
-        if (e.kind === "Data" && !showData) return false;
+      // 1. Filter Nodes
+      const activeNodeIds = new Set();
+      const filteredNodes = rawNodes.filter(n => {{
+        if (selectedScope !== "ALL" && n.scope !== selectedScope && n.id !== "root") {{
+          return false;
+        }}
+        if (searchQuery && !n.full_code.toLowerCase().includes(searchQuery) && !n.id.toLowerCase().includes(searchQuery)) {{
+          return false;
+        }}
+        activeNodeIds.add(n.id);
         return true;
       }});
 
+      // 2. Filter Edges
+      const filteredEdges = rawEdges.filter(e => {{
+        if (!activeNodeIds.has(e.from) || !activeNodeIds.has(e.to)) return false;
+        if (taintOnly && !e.is_tainted) return false;
+        if (e.is_root_edge && !showRoot && selectedScope === "ALL") return false;
+        if (e.is_cross_scope && !showCross && selectedScope === "ALL") return false;
+        if (!e.is_root_edge && !e.is_cross_scope && !showIntra) return false;
+        return true;
+      }});
+
+      nodesDataSet.clear();
+      nodesDataSet.add(filteredNodes);
+
       edgesDataSet.clear();
-      edgesDataSet.add(filtered);
+      edgesDataSet.add(filteredEdges);
+
+      setTimeout(() => resetView(), 40);
     }}
 
-    ctrlCheck.addEventListener("change", applyFilter);
-    dataCheck.addEventListener("change", applyFilter);
-    taintCheck.addEventListener("change", applyFilter);
+    scopeSelector.addEventListener("change", applyFilters);
+    nodeSearch.addEventListener("input", applyFilters);
+    intraCheck.addEventListener("change", applyFilters);
+    crossCheck.addEventListener("change", applyFilters);
+    rootCheck.addEventListener("change", applyFilters);
+    taintCheck.addEventListener("change", applyFilters);
+
+    // Live Node HUD Updates on Hover
+    const hudName = document.getElementById("hud-name");
+    const hudScopeBadge = document.getElementById("hud-scope-badge");
+    const hudCodeBox = document.getElementById("hud-code-box");
+    const hudIn = document.getElementById("hud-in");
+    const hudOut = document.getElementById("hud-out");
+    const hudTaintStat = document.getElementById("hud-taint-stat");
+
+    function updateHud(nodeId) {{
+      const node = rawNodesMap[nodeId];
+      if (!node) return;
+
+      hudName.textContent = `[${{node.node_type}}] ${{nodeId}}`;
+      hudScopeBadge.textContent = node.scope;
+      hudCodeBox.textContent = node.full_code;
+
+      const connectedEdges = network.getConnectedEdges(nodeId);
+      let inCount = 0;
+      let outCount = 0;
+      connectedEdges.forEach(eId => {{
+        const e = edgesDataSet.get(eId);
+        if (e) {{
+          if (e.to === nodeId) inCount++;
+          if (e.from === nodeId) outCount++;
+        }}
+      }});
+
+      hudIn.textContent = inCount;
+      hudOut.textContent = outCount;
+      hudTaintStat.style.display = node.is_tainted ? "inline" : "none";
+    }}
+
+    network.on("hoverNode", function(params) {{
+      updateHud(params.node);
+    }});
+
+    network.on("selectNode", function(params) {{
+      if (params.nodes.length > 0) {{
+        updateHud(params.nodes[0]);
+      }}
+    }});
+
+    // Apply initial filter (cross-function & root fanout hidden by default for clean architecture)
+    applyFilters();
   </script>
 </body>
 </html>
@@ -488,4 +783,4 @@ def authenticate(username, token):
     ]
     out_file = "interactive_pdg_preview.html"
     save_pdg_html(graph, out_file, tainted_flows=taints)
-    print(f"Interactive PDG generated and saved to: {out_file}")
+    print(f"Orderly grid PDG preview generated at: {out_file}")

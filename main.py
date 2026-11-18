@@ -176,7 +176,7 @@ def calculate_discount(price, is_member):
         try:
             from agent_security.workflow_dfa import WorkflowDFA
             dfa = WorkflowDFA()
-            for ev in ["validate", "parse", "graph", "audit"]:
+            for ev in ["validate", "parse", "graph", "green_audit", "audit"]:
                 dfa.step(ev)
         except ImportError:
             dfa = None

@@ -1,0 +1,168 @@
+{
+  "status": "success",
+  "sample_count": 20,
+  "mean_bleu": 0.0938,
+  "mean_rouge_l": 0.1112,
+  "samples": [
+    {
+      "id": 1,
+      "name": "addition",
+      "bleu": 0.1495,
+      "rouge_l": 0.1818,
+      "reference": "Returns the sum of two numbers a and b.",
+      "generated": "Defines 'add' which accepts (a, b) and performs add. Returns the computed result."
+    },
+    {
+      "id": 2,
+      "name": "reverse_string",
+      "bleu": 0.0955,
+      "rouge_l": 0.1053,
+      "reference": "Reverses a string using slice notation.",
+      "generated": "Defines 'reverse_string' which accepts (s) and performs reverse string. Returns the computed result."
+    },
+    {
+      "id": 3,
+      "name": "is_palindrome",
+      "bleu": 0.1057,
+      "rouge_l": 0.2,
+      "reference": "Checks if a string is a palindrome.",
+      "generated": "Defines 'is_palindrome' which accepts (s) and performs is palindrome. Returns the computed result."
+    },
+    {
+      "id": 4,
+      "name": "factorial",
+      "bleu": 0.0915,
+      "rouge_l": 0.1818,
+      "reference": "Calculates the factorial of n recursively.",
+      "generated": "Defines 'factorial' which accepts (n) and performs factorial. Includes conditional logic branching. Returns the computed result."
+    },
+    {
+      "id": 5,
+      "name": "flatten_list",
+      "bleu": 0.0874,
+      "rouge_l": 0.0,
+      "reference": "Flattens a two dimensional list into a single list.",
+      "generated": "Defines 'flatten' which accepts (lst) and performs flatten. Returns the computed result."
+    },
+    {
+      "id": 6,
+      "name": "fibonacci",
+      "bleu": 0.0799,
+      "rouge_l": 0.087,
+      "reference": "Generates the nth Fibonacci number iteratively.",
+      "generated": "Defines 'fibonacci' which accepts (n) and performs fibonacci. It iterates over input elements. Returns the computed result."
+    },
+    {
+      "id": 7,
+      "name": "binary_search",
+      "bleu": 0.1041,
+      "rouge_l": 0.1765,
+      "reference": "Performs binary search on a sorted list to find target index.",
+      "generated": "Defines 'binary_search' which accepts (arr, target) and performs binary search. It iterates over input elements. Includes conditional logic branching. Returns the computed result."
+    },
+    {
+      "id": 8,
+      "name": "is_prime",
+      "bleu": 0.0729,
+      "rouge_l": 0.1429,
+      "reference": "Determines whether an integer is prime.",
+      "generated": "Defines 'is_prime' which accepts (n) and performs is prime. It iterates over input elements. Includes conditional logic branching. Returns the computed result."
+    },
+    {
+      "id": 9,
+      "name": "gcd",
+      "bleu": 0.0681,
+      "rouge_l": 0.0769,
+      "reference": "Computes the greatest common divisor of two integers.",
+      "generated": "Defines 'gcd' which accepts (a, b) and performs gcd. It iterates over input elements. Returns the computed result."
+    },
+    {
+      "id": 10,
+      "name": "count_vowels",
+      "bleu": 0.1057,
+      "rouge_l": 0.0952,
+      "reference": "Counts the number of vowels in a string.",
+      "generated": "Defines 'count_vowels' which accepts (s) and performs count vowels. Returns the computed result."
+    },
+    {
+      "id": 11,
+      "name": "find_max",
+      "bleu": 0.0613,
+      "rouge_l": 0.0645,
+      "reference": "Finds the maximum value in an iterable of numbers.",
+      "generated": "Defines 'find_max' which accepts (numbers) and performs find max. It iterates over input elements. Includes conditional logic branching. Returns the computed result."
+    },
+    {
+      "id": 12,
+      "name": "merge_dicts",
+      "bleu": 0.0743,
+      "rouge_l": 0.0,
+      "reference": "Merges two dictionaries into a single dictionary.",
+      "generated": "Defines 'merge_dicts' which accepts (d1, d2) and performs merge dicts. Returns the computed result."
+    },
+    {
+      "id": 13,
+      "name": "clamp",
+      "bleu": 0.1051,
+      "rouge_l": 0.1667,
+      "reference": "Restricts a numerical value within specified low and high bounds.",
+      "generated": "Defines 'clamp' which accepts (val, low, high) and performs clamp. Returns the computed result."
+    },
+    {
+      "id": 14,
+      "name": "remove_duplicates",
+      "bleu": 0.0803,
+      "rouge_l": 0.0,
+      "reference": "Removes duplicate elements while preserving initial ordering.",
+      "generated": "Defines 'remove_duplicates' which accepts (seq) and performs remove duplicates. Returns the computed result."
+    },
+    {
+      "id": 15,
+      "name": "calculate_discount",
+      "bleu": 0.0884,
+      "rouge_l": 0.0952,
+      "reference": "Calculates discounted final price for member status.",
+      "generated": "Defines 'calculate_discount' which accepts (price, is_member) and performs calculate discount. Returns the computed result."
+    },
+    {
+      "id": 16,
+      "name": "to_camel_case",
+      "bleu": 0.1257,
+      "rouge_l": 0.2,
+      "reference": "Converts snake case string to camel case.",
+      "generated": "Defines 'to_camel' which accepts (s) and performs to camel. Returns the computed result."
+    },
+    {
+      "id": 17,
+      "name": "chunk_list",
+      "bleu": 0.0955,
+      "rouge_l": 0.0909,
+      "reference": "Splits a list into smaller chunks of size n.",
+      "generated": "Defines 'chunk' which accepts (lst, n) and performs chunk. Returns the computed result."
+    },
+    {
+      "id": 18,
+      "name": "celsius_to_fahrenheit",
+      "bleu": 0.0884,
+      "rouge_l": 0.1,
+      "reference": "Converts temperature from Celsius to Fahrenheit.",
+      "generated": "Defines 'c_to_f' which accepts (c) and performs c to f. Returns the computed result."
+    },
+    {
+      "id": 19,
+      "name": "read_json_file",
+      "bleu": 0.1136,
+      "rouge_l": 0.1818,
+      "reference": "Loads and deserializes JSON content from a file path.",
+      "generated": "Defines 'read_json' which accepts (path) and performs read json. Returns the computed result."
+    },
+    {
+      "id": 20,
+      "name": "safe_divide",
+      "bleu": 0.0823,
+      "rouge_l": 0.0769,
+      "reference": "Safely divides two numbers returning default value on division by zero.",
+      "generated": "Defines 'safe_divide' which accepts (a, b, default) and performs safe divide. Returns the computed result."
+    }
+  ]
+}
