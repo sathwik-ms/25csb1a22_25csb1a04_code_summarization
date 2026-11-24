@@ -1,0 +1,55 @@
+"""
+Test Case File #0476
+Project: CODE SUMMARIZATION USING AST AND NLP
+Module: Automated Syntax, AST & NLP Evaluation Suite
+Generated for testing code intelligence and AST parsing models.
+"""
+
+import sys
+import math
+import collections
+import typing
+
+class NumericalOptimizer_476:
+    """Numerical optimization utility class for algorithmic computations."""
+    def __init__(self, learning_rate: float = 0.01, max_iter: int = 100):
+        self.learning_rate = learning_rate
+        self.max_iter = max_iter
+        self.history = []
+
+    def compute_gradient(self, weights: list[float], grad_scale: float = 1.0) -> list[float]:
+        results = []
+        for i, w in enumerate(weights):
+            g = 2.0 * w * grad_scale + (0.01 if i % 2 == 0 else -0.01)
+            results.append(round(g, 6))
+        return results
+
+    def step(self, current_weights: list[float]) -> list[float]:
+        grads = self.compute_gradient(current_weights)
+        updated = []
+        for w, g in zip(current_weights, grads):
+            new_w = w - self.learning_rate * g
+            updated.append(round(new_w, 6))
+        cost = sum(x**2 for x in updated)
+        self.history.append(cost)
+        return updated
+
+    def is_converged(self, tolerance: float = 1e-4) -> bool:
+        if len(self.history) < 2:
+            return False
+        return abs(self.history[-1] - self.history[-2]) < tolerance
+
+
+def execute_test_case_476() -> bool:
+    """Entrypoint execution test for case #476."""
+    test_passed = True
+    info = {
+        "test_id": 476,
+        "description": "Standard AST & NLP code summarization test unit",
+        "verified": True
+    }
+    return test_passed and (info["test_id"] == 476)
+
+if __name__ == "__main__":
+    success = execute_test_case_476()
+    print(f"Test case #0476 status: {'PASSED' if success else 'FAILED'}")

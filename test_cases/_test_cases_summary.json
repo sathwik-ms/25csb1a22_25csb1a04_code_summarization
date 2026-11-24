@@ -1,0 +1,17 @@
+{
+    "total_files": 1000,
+    "directory": "c:\\Users\\sathw\\OneDrive\\Desktop\\25CSB1A22 25CSB1A04 CODE SUMMARIZATION USING AST AND NLP\\test_cases",
+    "min_lines": 48,
+    "min_file": "test_case_0004.py",
+    "max_lines": 5043,
+    "max_file": "test_case_1000.py",
+    "files_with_5000_plus_lines": [
+        {
+            "filename": "test_case_1000.py",
+            "lines": 5043,
+            "path": "c:\\Users\\sathw\\OneDrive\\Desktop\\25CSB1A22 25CSB1A04 CODE SUMMARIZATION USING AST AND NLP\\test_cases\\test_case_1000.py"
+        }
+    ],
+    "all_files_syntax_valid": true,
+    "generation_time_seconds": 1.99
+}
